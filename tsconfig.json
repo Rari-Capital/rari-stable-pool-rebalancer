@@ -1,0 +1,15 @@
+{
+    "compilerOptions": {
+        "target": "es6",
+        "module": "commonjs",
+        "sourceMap": true,
+        "watch": true,
+        "allowSyntheticDefaultImports": true,
+        "esModuleInterop": true
+    },
+    "files": [
+        "index.ts",
+        "protocols/dydx.ts",
+        "protocols/compound.ts"
+    ]
+}
