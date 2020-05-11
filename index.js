@@ -10,7 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 var Web3 = require('web3');
 const https = require('https');
 const erc20Abi = require('./erc20-abi');
-const farmerFundManagerAbi = require('./farmer-fund-manager-abi');
+const rariFundManagerAbi = require('./rari-fund-manager-abi');
 const DyDxProtocol = require('./protocols/dydx');
 const CompoundProtocol = require('./protocols/compound');
 // Init Web3
@@ -172,7 +172,7 @@ function getSumPendingWithdrawals(currencyCode) {
         // Get sum of pending withdrawals
         if (process.env.NODE_ENV !== "production")
             console.log("Checking for pending withdrawals for", currencyCode);
-        var fundManagerContract = new web3.eth.Contract(farmerFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+        var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
         var countPendingWithdrawals = yield fundManagerContract.methods.countPendingWithdrawals(currencyCode).call();
         var sumPendingWithdrawalsBN = web3.utils.toBN(0);
         if (countPendingWithdrawals > 0) {
@@ -188,7 +188,7 @@ function getSumPendingWithdrawals(currencyCode) {
 }
 function processPendingWithdrawals(currencyCode) {
     return __awaiter(this, void 0, void 0, function* () {
-        var fundManagerContract = new web3.eth.Contract(farmerFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+        var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
         // Create processPendingWithdrawals transaction
         var data = fundManagerContract.methods.processPendingWithdrawals(currencyCode).encodeABI();
         // Build transaction
@@ -388,7 +388,7 @@ function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerFeesBN 
 }
 function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
     return __awaiter(this, void 0, void 0, function* () {
-        var fundManagerContract = new web3.eth.Contract(farmerFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+        var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
         // Create withdrawFromPool transaction
         var data = fundManagerContract.methods.withdrawFromPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
         // Build transaction
@@ -428,7 +428,7 @@ function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
 }
 function addFunds(poolName, currencyCode, amountBN) {
     return __awaiter(this, void 0, void 0, function* () {
-        var fundManagerContract = new web3.eth.Contract(farmerFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+        var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
         // Create depositToPool transaction
         var data = fundManagerContract.methods.depositToPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
         // Build transaction

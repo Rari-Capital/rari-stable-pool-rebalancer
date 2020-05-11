@@ -1,4 +1,4 @@
-const farmerFundManagerAbi = [
+const rariFundManagerAbi = [
     {
         "inputs": [],
         "payable": false,
@@ -527,4 +527,4 @@ const farmerFundManagerAbi = [
     }
 ];
 
-module.exports = farmerFundManagerAbi;
+module.exports = rariFundManagerAbi;

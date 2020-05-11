@@ -1,6 +1,6 @@
 module.exports = {
   apps : [{
-    name: 'farmer-fund-rebalancer',
+    name: 'rari-fund-rebalancer',
     script: 'index.js',
 
     // Options reference: https://pm2.keymetrics.io/docs/usage/application-declaration/

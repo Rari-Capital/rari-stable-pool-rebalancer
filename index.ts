@@ -2,7 +2,7 @@ var Web3 = require('web3');
 const https = require('https');
 
 const erc20Abi = require('./erc20-abi');
-const farmerFundManagerAbi = require('./farmer-fund-manager-abi');
+const rariFundManagerAbi = require('./rari-fund-manager-abi');
 const DyDxProtocol = require('./protocols/dydx');
 const CompoundProtocol = require('./protocols/compound');
 
@@ -168,7 +168,7 @@ async function tryBalanceSupplyAllCurrencies() {
 async function getSumPendingWithdrawals(currencyCode) {
     // Get sum of pending withdrawals
     if (process.env.NODE_ENV !== "production") console.log("Checking for pending withdrawals for", currencyCode);
-    var fundManagerContract = new web3.eth.Contract(farmerFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
     var countPendingWithdrawals = await fundManagerContract.methods.countPendingWithdrawals(currencyCode).call();
     var sumPendingWithdrawalsBN = web3.utils.toBN(0);
 
@@ -186,7 +186,7 @@ async function getSumPendingWithdrawals(currencyCode) {
 }
 
 async function processPendingWithdrawals(currencyCode) {
-    var fundManagerContract = new web3.eth.Contract(farmerFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
 
     // Create processPendingWithdrawals transaction
     var data = fundManagerContract.methods.processPendingWithdrawals(currencyCode).encodeABI();
@@ -390,7 +390,7 @@ async function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerF
 }
 
 async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
-    var fundManagerContract = new web3.eth.Contract(farmerFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
 
     // Create withdrawFromPool transaction
     var data = fundManagerContract.methods.withdrawFromPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
@@ -432,7 +432,7 @@ async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) 
 }
 
 async function addFunds(poolName, currencyCode, amountBN) {
-    var fundManagerContract = new web3.eth.Contract(farmerFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
 
     // Create depositToPool transaction
     var data = fundManagerContract.methods.depositToPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
