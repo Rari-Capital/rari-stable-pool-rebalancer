@@ -2,7 +2,7 @@
 
 import Web3 from 'web3';
 
-const cErc20DelegatorAbi = require('./compound/cerc20-delegator-abi');
+const cErc20DelegatorAbi = require('./abi/CErc20Delegator.json');
 
 class CompoundProtocol {
     web3: Web3;
@@ -30,9 +30,10 @@ class CompoundProtocol {
                 throw "Failed to get Compound " + currencyCodes[i] + " supplyRatePerBlock: " + error;
             }
 
-            // TODO: Difference in average block time (assumed here to be 14 seconds) is likely the answer to the question of why we get here different from the answer we get at https://compound.finance/markets and https://api.compound.finance/api/v2/ctoken
-            // TODO: Use big integers for Compound APR calculations
-            var apr = ((60 * 60 * 24 * 365) / 14) * (supplyRatePerBlock / 1e18);
+            // TODO: Use big numbers for Compound APR calculations
+            // TODO: Get blocksPerYear dynamically from interestRateModel.blocksPerYear
+            var blocksPerYear = 2102400; // See https://github.com/compound-finance/compound-protocol/blob/v2.6-rc2/contracts/JumpRateModel.sol#L23 and https://github.com/compound-finance/compound-protocol/blob/v2.6-rc2/contracts/WhitePaperInterestRateModel.sol#L24
+            var apr = (supplyRatePerBlock / 1e18) * blocksPerYear;
             aprs[currencyCodes[i]] = apr;
         }
 

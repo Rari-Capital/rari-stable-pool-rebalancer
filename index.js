@@ -9,8 +9,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 var Web3 = require('web3');
 const https = require('https');
-const erc20Abi = require('./erc20-abi');
-const rariFundManagerAbi = require('./rari-fund-manager-abi');
+const erc20Abi = require('./abi/ERC20.json');
+const rariFundManagerAbi = require('./abi/RariFundManager.json');
 const DyDxProtocol = require('./protocols/dydx');
 const CompoundProtocol = require('./protocols/compound');
 // Init Web3
@@ -35,6 +35,14 @@ var db = {
     },
     pools: {
         "dYdX": {
+            currencies: {
+                "DAI": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                }
+            }
+        },
+        "Compound": {
             currencies: {
                 "DAI": {
                     poolBalanceBN: web3.utils.toBN(0),

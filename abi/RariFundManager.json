@@ -1,4 +1,4 @@
-const rariFundManagerAbi = [
+[
     {
         "inputs": [],
         "payable": false,
@@ -525,6 +525,4 @@ const rariFundManagerAbi = [
         "stateMutability": "nonpayable",
         "type": "function"
     }
-];
-
-module.exports = rariFundManagerAbi;
+]

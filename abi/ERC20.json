@@ -1,4 +1,4 @@
-const erc20Abi = [
+[
     {
         "constant": true,
         "inputs": [],
@@ -219,6 +219,4 @@ const erc20Abi = [
         "name": "Transfer",
         "type": "event"
     }
-];
-
-module.exports = erc20Abi;
+]
