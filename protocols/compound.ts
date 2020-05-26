@@ -2,7 +2,7 @@
 
 import Web3 from 'web3';
 
-const cErc20DelegatorAbi = require('./abi/CErc20Delegator.json');
+const cErc20DelegatorAbi = require('./compound/CErc20Delegator.json');
 
 class CompoundProtocol {
     web3: Web3;
