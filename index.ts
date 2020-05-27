@@ -56,6 +56,7 @@ var db = {
 async function doCycle() {
     await checkAllBalances();
     await getAllAprs();
+    await setAcceptedCurrencies();
     if (parseInt(process.env.AUTOMATIC_SUPPLY_BALANCING_ENABLED)) await tryBalanceSupply();
     setTimeout(doCycle, (process.env.REBALANCER_CYCLE_DELAY_SECONDS ? parseFloat(process.env.REBALANCER_CYCLE_DELAY_SECONDS) : 60) * 1000);
 }
@@ -73,6 +74,72 @@ async function onLoad() {
 }
 
 onLoad();
+
+/* SETTING ACCEPTED CURRENCIES */
+
+async function setAcceptedCurrencies() {
+    // Get best currency and pool for potential currency exchange
+    try {
+        var [bestCurrencyCode, bestPoolName, bestApr] = await getBestCurrencyAndPool();
+    } catch (error) {
+        return console.error("Failed to get best currency and pool when trying to set accepted currencies:", error);
+    }
+    
+    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+
+    for (const currencyCode of Object.keys(db.currencies)) if (currencyCode !== "ETH") {
+        var accepted = await fundManagerContract.methods.isAcceptedCurrency(currencyCode).call();
+
+        try {
+            if (!accepted && currencyCode === bestCurrencyCode) await setAcceptedCurrency(currencyCode, true);
+            else if (accepted && currencyCode !== bestCurrencyCode) await setAcceptedCurrency(currencyCode, false);
+        } catch (error) {
+            return console.error(error);
+        }
+    }
+}
+
+async function setAcceptedCurrency(currencyCode, accepted) {
+    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+
+    // Create processPendingWithdrawals transaction
+    var data = fundManagerContract.methods.setAcceptedCurrency(currencyCode, accepted).encodeABI();
+
+    // Build transaction
+    var tx = {
+        from: process.env.ETHEREUM_ADMIN_ACCOUNT,
+        to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
+        value: 0,
+        data: data,
+        nonce: await web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
+    };
+
+    if (process.env.NODE_ENV !== "production") console.log("Setting", currencyCode, "as", accepted ? "accepted" : "not accepted", ":", tx);
+
+    // Estimate gas for transaction
+    try {
+        tx["gas"] = await web3.eth.estimateGas(tx);
+    } catch (error) {
+        throw "Failed to estimate gas before signing and sending transaction for setAcceptedCurrency: " + error;
+    }
+    
+    // Sign transaction
+    try {
+        var signedTx = await web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
+    } catch (error) {
+        throw "Error signing transaction for setAcceptedCurrency: " + error;
+    }
+
+    // Send transaction
+    try {
+        var sentTx = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+    } catch (error) {
+        throw "Error sending transaction for setAcceptedCurrency: " + error;
+    }
+    
+    console.log("Successfully set", currencyCode, "as", accepted ? "accepted" : "not accepted", ":", sentTx);
+    return sentTx;
+}
 
 /* POOL APR CHECKING */
 
