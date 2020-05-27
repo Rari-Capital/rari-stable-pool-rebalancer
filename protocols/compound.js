@@ -10,7 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const cErc20DelegatorAbi = require('./abi/CErc20Delegator.json');
+const cErc20DelegatorAbi = require('./compound/CErc20Delegator.json');
 class CompoundProtocol {
     constructor(web3) {
         this.cErc20Contracts = {
@@ -18,27 +18,33 @@ class CompoundProtocol {
         };
         this.web3 = web3;
     }
+    supplyRatePerBlockToApr(supplyRatePerBlock) {
+        // TODO: Use big numbers for Compound APR calculations
+        // TODO: Get blocksPerYear dynamically from interestRateModel.blocksPerYear
+        var blocksPerYear = 2102400; // See https://github.com/compound-finance/compound-protocol/blob/v2.6-rc2/contracts/JumpRateModel.sol#L23 and https://github.com/compound-finance/compound-protocol/blob/v2.6-rc2/contracts/WhitePaperInterestRateModel.sol#L24
+        var apr = (supplyRatePerBlock / 1e18) * blocksPerYear;
+        return apr;
+    }
+    getApr(currencyCode) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!this.cErc20Contracts[currencyCode])
+                throw "No cToken known for currency code " + currencyCode;
+            // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
+            var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCode]);
+            try {
+                var supplyRatePerBlock = yield cErc20Contract.methods.supplyRatePerBlock().call();
+            }
+            catch (error) {
+                throw "Failed to get Compound " + currencyCode + " supplyRatePerBlock: " + error;
+            }
+            return this.supplyRatePerBlockToApr(supplyRatePerBlock);
+        });
+    }
     getAprs(currencyCodes) {
         return __awaiter(this, void 0, void 0, function* () {
             var aprs = {};
-            // For each currency
-            for (var i = 0; i < currencyCodes.length; i++) {
-                if (!this.cErc20Contracts[currencyCodes[i]])
-                    continue;
-                // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
-                var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCodes[i]]);
-                try {
-                    var supplyRatePerBlock = yield cErc20Contract.methods.supplyRatePerBlock().call();
-                }
-                catch (error) {
-                    throw "Failed to get Compound " + currencyCodes[i] + " supplyRatePerBlock: " + error;
-                }
-                // TODO: Use big numbers for Compound APR calculations
-                // TODO: Get blocksPerYear dynamically from interestRateModel.blocksPerYear
-                var blocksPerYear = 2102400; // See https://github.com/compound-finance/compound-protocol/blob/v2.6-rc2/contracts/JumpRateModel.sol#L23 and https://github.com/compound-finance/compound-protocol/blob/v2.6-rc2/contracts/WhitePaperInterestRateModel.sol#L24
-                var apr = (supplyRatePerBlock / 1e18) * blocksPerYear;
-                aprs[currencyCodes[i]] = apr;
-            }
+            for (var i = 0; i < currencyCodes.length; i++)
+                aprs[currencyCodes[i]] = yield this.getApr(currencyCodes[i]);
             return aprs;
         });
     }
@@ -60,11 +66,11 @@ class CompoundProtocol {
                 }
                 if (process.env.NODE_ENV !== "production")
                     console.log("CompoundProtocol.getUnderlyingBalances got", balanceOfUnderlying, currencyCodes[i]);
-                balances[currencyCodes[i]] = web3.utils.toBN(balanceOfUnderlying);
+                balances[currencyCodes[i]] = this.web3.utils.toBN(balanceOfUnderlying);
             }
             return balances;
         });
     }
 }
-module.exports = CompoundProtocol;
+exports.default = CompoundProtocol;
 //# sourceMappingURL=compound.js.map

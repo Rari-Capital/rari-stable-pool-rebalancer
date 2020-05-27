@@ -7,7 +7,7 @@ var Solo = _solo.Solo,
     MarketId = _solo.MarketId,
     BigNumber = _solo.BigNumber;
 
-class DydxProtocol {
+export default class DydxProtocol {
     web3: Web3;
     solo: any; // TODO: Change type to Solo when import issue above is fixed
 
@@ -22,6 +22,17 @@ class DydxProtocol {
                 defaultAccount: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS, // Optional
             }, // Optional
         );
+    }
+
+    async getApr(currencyCode) {
+        // TODO: May have to use getMarketSupplyInterestRate from https://github.com/dydxprotocol/solo/blob/master/src/modules/Getters.ts
+        // TODO: Why use totalSupplyAPR over totalSupplyAPY? Simply because totalSupplyAPR is the one used by https://trade.dydx.exchange/balances
+        const { markets } = await this.solo.api.getMarkets();
+        
+        for (var i = 0; i < markets.length; i++)
+            if (currencyCode === markets[i].symbol) return parseFloat(markets[i].totalSupplyAPR);
+
+        throw "Unknown dYdX market";
     }
 
     async getAprs(currencyCodes) {
@@ -58,5 +69,3 @@ class DydxProtocol {
         return balancesByCurrencyCode;
     }
 }
-
-module.exports = DydxProtocol;

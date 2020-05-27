@@ -1,18 +1,20 @@
-var Web3 = require('web3');
+import Web3 from 'web3';
 const https = require('https');
+
+import DydxProtocol from './protocols/dydx';
+import CompoundProtocol from './protocols/compound';
+import ZeroExExchange from './exchanges/0x';
 
 const erc20Abi = require('./abi/ERC20.json');
 const rariFundManagerAbi = require('./abi/RariFundManager.json');
-const DyDxProtocol = require('./protocols/dydx');
-const CompoundProtocol = require('./protocols/compound');
-const ZeroExExchange = require('./exchanges/0x');
 
 // Init Web3
 var web3 = new Web3(new Web3.providers.HttpProvider(process.env.INFURA_ENDPOINT_URL));
 
-// Init DyDxProtocol and CompoundProtocol
-var dydxProtocol = dydxProtocol = new DyDxProtocol(web3);
-var compoundProtocol = compoundProtocol = new CompoundProtocol(web3);
+// Init DydxProtocol, CompoundProtocol, and ZeroExExchange
+var dydxProtocol = new DydxProtocol(web3);
+var compoundProtocol = new CompoundProtocol(web3);
+var zeroExExchange = new ZeroExExchange(web3);
 
 // Mock currency and pool database
 var db = {
@@ -274,11 +276,23 @@ async function tryBalanceSupply() {
 
         if (maxInputAmountBN.gt(web3.utils.toBN(0))) {
             // Calculate min marginal output amount to exchange funds
-            var maxMarginalOutputAmount = 1 / ZeroExExchange.getPrice(currencyCode, bestCurrencyCode);
+            try {
+                var price = await zeroExExchange.getPrice(currencyCode, bestCurrencyCode);
+            } catch (error) {
+                db.isBalancingSupply = false;
+                return console.error("Failed to get price from 0x API when trying to balance supply:", error);
+            }
+
+            var maxMarginalOutputAmount = 1 / parseFloat(price);
             var minMarginalOutputAmountBN = web3.utils.toBN(maxMarginalOutputAmount * (1 - (parseFloat(process.env.AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING) * (bestApr - bestAprForThisCurrency) * (secondsSinceLastSupplyBalancing / 86400 / 365))) * (10 ** db.currencies[bestCurrencyCode].decimals));
 
             // Get estimated filled input amount from 0x swap API
-            var [orders, estimatedInputAmountBN] = ZeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
+            try {
+                var [orders, estimatedInputAmountBN] = await zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
+            } catch (error) {
+                db.isBalancingSupply = false;
+                return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+            }
  
             // Withdraw estimatedInputAmountBN tokens from pools in order of lowest to highest supply rate
             var pools = db.currencies[currencyCode].pools.slice();
@@ -650,7 +664,12 @@ async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) 
 
 async function exchangeFunds(inputCurrencyCode, outputCurrencyCode, maxInputAmountBN, minMarginalOutputAmountBN) {
     // Get orders from 0x swap API
-    var [orders, filledInputAmountBN] = ZeroExExchange.getSwapOrders(db.currencies[inputCurrencyCode].tokenAddress, db.currencies[outputCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
+    try {
+        var [orders, filledInputAmountBN] = await zeroExExchange.getSwapOrders(db.currencies[inputCurrencyCode].tokenAddress, db.currencies[outputCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
+    } catch (error) {
+        throw "Failed to get orders from 0x swap API for fill0xOrdersUpTo to exchange " + inputCurrencyCode + " to " + outputCurrencyCode + ": " + error;
+    }
+
     var signatures = [];
     for (var i = 0; i < orders.length; i++) signatures.push(orders[i].signature);
 

@@ -1,15 +1,17 @@
-var Web3 = require('web3');
+const Web3 = require('web3');
 const assert = require('assert');
 
-const DyDxProtocol = require('./protocols/dydx');
-const CompoundProtocol = require('./protocols/compound');
+import DydxProtocol from './protocols/dydx';
+import CompoundProtocol from './protocols/compound';
+
+const rariFundManagerAbi = require('./abi/RariFundManager.json');
 
 // Init Web3
 var web3 = new Web3(new Web3.providers.HttpProvider(process.env.INFURA_ENDPOINT_URL));
 
-// Init DyDxProtocol and CompoundProtocol
-var dydxProtocol = dydxProtocol = new DyDxProtocol(web3);
-var compoundProtocol = compoundProtocol = new CompoundProtocol(web3);
+// Init DydxProtocol and CompoundProtocol
+var dydxProtocol = new DydxProtocol(web3);
+var compoundProtocol = new CompoundProtocol(web3);
 
 var currencyCodesByPool = {
     "dYdX": ["DAI"],

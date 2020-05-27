@@ -21,6 +21,17 @@ class DydxProtocol {
             defaultAccount: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
         });
     }
+    getApr(currencyCode) {
+        return __awaiter(this, void 0, void 0, function* () {
+            // TODO: May have to use getMarketSupplyInterestRate from https://github.com/dydxprotocol/solo/blob/master/src/modules/Getters.ts
+            // TODO: Why use totalSupplyAPR over totalSupplyAPY? Simply because totalSupplyAPR is the one used by https://trade.dydx.exchange/balances
+            const { markets } = yield this.solo.api.getMarkets();
+            for (var i = 0; i < markets.length; i++)
+                if (currencyCode === markets[i].symbol)
+                    return parseFloat(markets[i].totalSupplyAPR);
+            throw "Unknown dYdX market";
+        });
+    }
     getAprs(currencyCodes) {
         return __awaiter(this, void 0, void 0, function* () {
             var aprs = {};
@@ -53,5 +64,5 @@ class DydxProtocol {
         });
     }
 }
-module.exports = DydxProtocol;
+exports.default = DydxProtocol;
 //# sourceMappingURL=dydx.js.map

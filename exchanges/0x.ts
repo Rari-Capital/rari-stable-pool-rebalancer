@@ -1,14 +1,14 @@
 import Web3 from 'web3';
 const https = require('https');
 
-class ZeroExExchange {
+export default class ZeroExExchange {
     web3: Web3;
 
     constructor(web3: Web3) {
         this.web3 = web3;
     }
 
-    async getPrice(inputTokenSymbol, outputTokenSymbol) {
+    async getPrice(inputTokenSymbol, outputTokenSymbol): Promise<string> {
         return new Promise((resolve, reject) => {
             https.get('https://api.0x.org/swap/v0/prices?sellToken=' + inputTokenSymbol, (resp) => {
                 let data = '';
@@ -37,7 +37,7 @@ class ZeroExExchange {
         });
     }
 
-    async getSwapOrders(inputTokenAddress, outputTokenAddress, maxInputAmountBN, minMarginalOutputAmountBN) {
+    async getSwapOrders(inputTokenAddress, outputTokenAddress, maxInputAmountBN, minMarginalOutputAmountBN): Promise<[any[], any]> {
         return new Promise((resolve, reject) => {
             https.get('https://api.0x.org/swap/v0/quote?sellToken=' + inputTokenAddress + '&buyToken=' + outputTokenAddress + '&sellAmount=' + maxInputAmountBN.toString(), (resp) => {
                 let data = '';
@@ -75,5 +75,3 @@ class ZeroExExchange {
         });
     }
 }
-
-module.exports = ZeroExExchange;
