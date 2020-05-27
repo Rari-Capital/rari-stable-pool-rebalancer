@@ -57,7 +57,7 @@ async function doCycle() {
     await checkAllBalances();
     await getAllAprs();
     if (parseInt(process.env.AUTOMATIC_SUPPLY_BALANCING_ENABLED)) await tryBalanceSupply();
-    setTimeout(doCycle, 60 * 1000);
+    setTimeout(doCycle, (process.env.REBALANCER_CYCLE_DELAY_SECONDS ? parseFloat(process.env.REBALANCER_CYCLE_DELAY_SECONDS) : 60) * 1000);
 }
 
 async function onLoad() {
