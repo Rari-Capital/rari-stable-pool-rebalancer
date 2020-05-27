@@ -10,7 +10,7 @@
     "files": [
         "index.ts",
         "protocols/dydx.ts",
-        "protocols/compound.ts"
+        "protocols/compound.ts",
         "emergencyUnsetAllowances.ts"
     ]
 }

@@ -47,8 +47,8 @@ var db = {
             }
         }
     },
-    db.isBalancingSupply: false,
-    db.lastTimeBalanced: 0
+    isBalancingSupply: false,
+    lastTimeBalanced: 0
 };
 
 async function doCycle() {
@@ -275,7 +275,7 @@ async function tryBalanceSupply() {
         if (maxInputAmountBN.gt(web3.utils.toBN(0))) {
             // Calculate min marginal output amount to exchange funds
             var maxMarginalOutputAmount = 1 / ZeroExExchange.getPrice(currencyCode, bestCurrencyCode);
-            var minMarginalOutputAmountBN = web3.utils.toBN(maxMarginalOutputAmount * (1 - (process.env.AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING * (bestApr - bestAprForThisCurrency) * (secondsSinceLastSupplyBalancing / 86400 / 365))) * (10 ** db.currencies[bestCurrencyCode].decimals));
+            var minMarginalOutputAmountBN = web3.utils.toBN(maxMarginalOutputAmount * (1 - (parseFloat(process.env.AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING) * (bestApr - bestAprForThisCurrency) * (secondsSinceLastSupplyBalancing / 86400 / 365))) * (10 ** db.currencies[bestCurrencyCode].decimals));
 
             // Get estimated filled input amount from 0x swap API
             var [orders, estimatedInputAmountBN] = ZeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
@@ -370,7 +370,7 @@ async function tryBalanceSupply() {
         } else console.log("Not balancing supply of", currencyCode, "because no change in balances");
 
         // Process pending withdrawals if we have any
-        if (sumPendingWithdrawalsBN.gt(web3.utils.toBN(0))) await processPendingWithdrawals(currencyCode);
+        if (sumPendingWithdrawalsBN[currencyCode].gt(web3.utils.toBN(0))) await processPendingWithdrawals(currencyCode);
     }
 
     db.isBalancingSupply = false;

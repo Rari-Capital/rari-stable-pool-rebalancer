@@ -1,7 +1,6 @@
 var Web3 = require('web3');
 const assert = require('assert');
 
-const erc20Abi = require('./abi/ERC20.json');
 const DyDxProtocol = require('./protocols/dydx');
 const CompoundProtocol = require('./protocols/compound');
 
