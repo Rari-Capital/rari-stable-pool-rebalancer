@@ -60,6 +60,9 @@ async function onLoad() {
     await updateCurrencyUsdRates();
     setInterval(function() { updateCurrencyUsdRates(); }, (process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS ? parseFloat(process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS) : 60) * 1000);
 
+    // Set max token allowances to pools
+    await setMaxTokenAllowances();
+
     // Start cycle of checking wallet balances and pool APRs and trying to balance supply of all currencies
     startCycle();
 }
@@ -84,6 +87,26 @@ async function getAllAprs() {
             db.pools[key].currencies[key2].supplyApr = aprs[key2];
         }
     }
+}
+
+/* TOKEN ALLOWANCES */
+
+async function setMaxTokenAllowances(unset = false) {
+    for (const poolName of Object.keys(db.pools))
+        for (const currencyCode of Object.keys(db.pools[poolName].currencies))
+            setMaxTokenAllowance(poolName, currencyCode, unset);
+}
+
+async function setMaxTokenAllowance(poolName, currencyCode, unset = false) {
+    console.log("Setting " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on", poolName);
+
+    try {
+        var txid = await approveFunds(poolName, currencyCode, unset ? web3.utils.toBN(0) : web3.utils.toBN(2).pow(web3.utils.toBN(256)).sub(web3.utils.toBN(1)));
+    } catch (error) {
+        console.log("Failed to set " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on", poolName);
+    }
+    
+    console.log((unset ? "Zero" : "Max") + " token allowance set successfully for", currencyCode, "on", poolName, ":", txid);
 }
 
 /* CURRENCY USD RATE UPDATING */
@@ -397,11 +420,11 @@ async function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerF
     // checkAllBalances();
 }
 
-async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
+async function approveFunds(poolName, currencyCode, amountBN) {
     var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
 
-    // Create withdrawFromPool transaction
-    var data = fundManagerContract.methods.withdrawFromPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
+    // Create depositToPool transaction
+    var data = fundManagerContract.methods.approveToPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
 
     // Build transaction
     var tx = {
@@ -412,30 +435,30 @@ async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) 
         nonce: await web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
     };
 
-    if (process.env.NODE_ENV !== "production") console.log("Removing", amountBN.toString(), currencyCode, "funds from", poolName, ":", tx);
+    if (process.env.NODE_ENV !== "production") console.log("Approving", amountBN.toString(), currencyCode, "funds to", poolName, ":", tx);
 
     // Estimate gas for transaction
     try {
         tx["gas"] = await web3.eth.estimateGas(tx);
     } catch (error) {
-        throw "Failed to estimate gas before signing and sending transaction for withdrawFromPool of " + currencyCode + " from " + poolName + ": " + error;
+        throw "Failed to estimate gas before signing and sending transaction for approveToPool of " + currencyCode + " to " + poolName + ": " + error;
     }
     
     // Sign transaction
     try {
         var signedTx = await web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
     } catch (error) {
-        throw "Error signing transaction for withdrawFromPool of " + currencyCode + " from " + poolName + ": " + error;
+        throw "Error signing transaction for approveToPool of " + currencyCode + " to " + poolName + ": " + error;
     }
 
     // Send transaction
     try {
         var sentTx = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
     } catch (error) {
-        throw "Error sending transaction for withdrawFromPool of " + currencyCode + " from " + poolName + ": " + error;
+        throw "Error sending transaction for approveToPool of " + currencyCode + " to " + poolName + ": " + error;
     }
     
-    console.log("Successfully removed", currencyCode, "funds from", poolName, ":", sentTx);
+    console.log("Successfully approved", currencyCode, "funds to", poolName, ":", sentTx);
     return sentTx;
 }
 
@@ -478,6 +501,48 @@ async function addFunds(poolName, currencyCode, amountBN) {
     }
     
     console.log("Successfully added", currencyCode, "funds to", poolName, ":", sentTx);
+    return sentTx;
+}
+
+async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
+    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+
+    // Create withdrawFromPool transaction
+    var data = fundManagerContract.methods.withdrawFromPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
+
+    // Build transaction
+    var tx = {
+        from: process.env.ETHEREUM_ADMIN_ACCOUNT,
+        to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
+        value: 0,
+        data: data,
+        nonce: await web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
+    };
+
+    if (process.env.NODE_ENV !== "production") console.log("Removing", amountBN.toString(), currencyCode, "funds from", poolName, ":", tx);
+
+    // Estimate gas for transaction
+    try {
+        tx["gas"] = await web3.eth.estimateGas(tx);
+    } catch (error) {
+        throw "Failed to estimate gas before signing and sending transaction for withdrawFromPool of " + currencyCode + " from " + poolName + ": " + error;
+    }
+    
+    // Sign transaction
+    try {
+        var signedTx = await web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
+    } catch (error) {
+        throw "Error signing transaction for withdrawFromPool of " + currencyCode + " from " + poolName + ": " + error;
+    }
+
+    // Send transaction
+    try {
+        var sentTx = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+    } catch (error) {
+        throw "Error sending transaction for withdrawFromPool of " + currencyCode + " from " + poolName + ": " + error;
+    }
+    
+    console.log("Successfully removed", currencyCode, "funds from", poolName, ":", sentTx);
     return sentTx;
 }
 
