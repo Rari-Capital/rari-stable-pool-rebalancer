@@ -90,6 +90,10 @@ async function onLoad() {
     await updateCurrencyUsdRates();
     setInterval(function() { updateCurrencyUsdRates(); }, (process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS ? parseFloat(process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS) : 60) * 1000);
 
+    // Start claiming interest fees regularly
+    await depositInterestFees();
+    setInterval(function() { depositInterestFees(); }, (process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS ? parseFloat(process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS) : 86400) * 1000);
+
     // Set max token allowances to pools and 0x
     await setMaxTokenAllowances();
 
@@ -98,6 +102,50 @@ async function onLoad() {
 }
 
 onLoad();
+
+/* CLAIMING INTEREST FEES */
+
+async function depositInterestFees() {
+    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+
+    // Create depositFees transaction
+    var data = fundManagerContract.methods.depositFees().encodeABI();
+
+    // Build transaction
+    var tx = {
+        from: process.env.ETHEREUM_ADMIN_ACCOUNT,
+        to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
+        value: 0,
+        data: data,
+        nonce: await web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
+    };
+
+    if (process.env.NODE_ENV !== "production") console.log("Depositing fees back into fund manager", ":", tx);
+
+    // Estimate gas for transaction
+    try {
+        tx["gas"] = await web3.eth.estimateGas(tx);
+    } catch (error) {
+        throw "Failed to estimate gas before signing and sending transaction for depositFees: " + error;
+    }
+    
+    // Sign transaction
+    try {
+        var signedTx = await web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
+    } catch (error) {
+        throw "Error signing transaction for depositFees: " + error;
+    }
+
+    // Send transaction
+    try {
+        var sentTx = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+    } catch (error) {
+        throw "Error sending transaction for depositFees: " + error;
+    }
+    
+    console.log("Successfully deposited fees back into fund manager", ":", sentTx);
+    return sentTx;
+}
 
 /* SETTING ACCEPTED CURRENCIES */
 

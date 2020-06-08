@@ -21,7 +21,8 @@ module.exports = {
       AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE: 1000000, // The minimum algorithmic net value of an automatic supply rebalancing required to actually execute it (algorithmic net value of a rebalancing = additional yearly interest in USD expected from the rebalancing * seconds since last rebalancing / maximum possible Ethereum gas fees in USD required for the rebalancing)
       AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING: 1.0, // The maximum amount of slippage including exchange fees (from 0 to 1) per addition of APR (from 0 to 1) per the number of seconds since the last rebalancing; in theory, max slippage per APR increase per year since last rebalancing is 1 (right?)
       WITHDRAWAL_QUEUE_ENABLED: 1,
-      UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS: 30 * 60
+      UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS: 30 * 60,
+      CLAIM_INTEREST_FEES_INTERVAL_SECONDS: 86400
     },
     env_production: {
       NODE_ENV: 'production',
@@ -35,7 +36,8 @@ module.exports = {
       AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE: 1000000, // The minimum algorithmic net value of an automatic supply rebalancing required to actually execute it (algorithmic net value of a rebalancing = additional yearly interest in USD expected from the rebalancing * seconds since last rebalancing / maximum possible Ethereum gas fees in USD required for the rebalancing)
       AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING: 1.0, // The maximum amount of slippage including exchange fees (from 0 to 1) per addition of APR (from 0 to 1) per the number of seconds since the last rebalancing; in theory, max slippage per APR increase per year since last rebalancing is 1 (right?)
       WITHDRAWAL_QUEUE_ENABLED: 1,
-      UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS: 30 * 60
+      UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS: 30 * 60,
+      CLAIM_INTEREST_FEES_INTERVAL_SECONDS: 86400
     }
   }]
 };
