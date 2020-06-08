@@ -887,7 +887,7 @@ async function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFi
     var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
 
     // Create fill0xOrdersUpTo transaction
-    var data = fundManagerContract.methods.fill0xOrdersUpTo(inputCurrencyCode, outputCurrencyCode, orders, signatures, takerAssetFillAmountBN).encodeABI();
+    var data = fundManagerContract.methods.fill0xOrdersUpTo(orders, signatures, takerAssetFillAmountBN).encodeABI();
 
     // Build transaction
     var tx = {
