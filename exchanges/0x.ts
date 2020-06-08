@@ -37,7 +37,7 @@ export default class ZeroExExchange {
         });
     }
 
-    async getSwapOrders(inputTokenAddress, outputTokenAddress, maxInputAmountBN, minMarginalOutputAmountBN): Promise<[any[], any]> {
+    async getSwapOrders(inputTokenAddress, inputTokenDecimals, outputTokenAddress, maxInputAmountBN, minMarginalOutputAmountBN): Promise<[any[], any, any, any]> {
         return new Promise((resolve, reject) => {
             https.get('https://api.0x.org/swap/v0/quote?sellToken=' + inputTokenAddress + '&buyToken=' + outputTokenAddress + '&sellAmount=' + maxInputAmountBN.toString(), (resp) => {
                 let data = '';
@@ -53,21 +53,27 @@ export default class ZeroExExchange {
                     if (!decoded) reject("Failed to decode quote from 0x swap API");
                     if (!decoded.orders) reject("No orders found on 0x swap API");
 
+                    decoded.orders.sort((a, b) => (a.makerAssetAmount / (a.takerAssetAmount + a.takerFee) < b.makerAssetAmount / (b.takerAssetAmount + b.takerFee)) ? 1 : -1);
+
                     var orders = [];
-                    var filledInputAmountBN = this.web3.utils.toBN(0);
+                    var totalInputAmountBN = this.web3.utils.toBN(0);
+                    var takerAssetFilledAmountBN = this.web3.utils.toBN(0);
             
-                    // TODO: Make sure orders from API are sorted in ascending order of price
                     for (var i = 0; i < decoded.orders.length; i++) {
-                        var takerAssetAmountBN = this.web3.utils.toBN(orders[i].takerAssetAmount);
-                        if (this.web3.utils.toBN(orders[i].makerAssetAmount).lt(takerAssetAmountBN.mul(minMarginalOutputAmountBN).div(this.web3.utils.toBN(10).pow(this.web3.utils.toBN(18))))) break;
-                        var takerAssetFilledAmountBN = maxInputAmountBN.sub(filledInputAmountBN).lte(takerAssetAmountBN) ? maxInputAmountBN.sub(filledInputAmountBN) : takerAssetAmountBN;
-                        filledInputAmountBN.iadd(takerAssetFilledAmountBN);
-                        if (filledInputAmountBN.eq(maxInputAmountBN)) break;
+                        if (decoded.orders[i].takerFee > 0 && decoded.orders[i].takerFeeAssetData !== "0xf47261b0000000000000000000000000" + inputTokenAddress) continue;
+                        var takerAssetAmountBN = this.web3.utils.toBN(decoded.orders[i].takerAssetAmount);
+                        var takerFeeBN = this.web3.utils.toBN(decoded.orders[i].takerFee);
+                        var orderMaxInputAmountBN = takerAssetAmountBN.add(takerFeeBN);
+                        if (this.web3.utils.toBN(decoded.orders[i].makerAssetAmount).lt(orderMaxInputAmountBN.mul(minMarginalOutputAmountBN).div(this.web3.utils.toBN(10).pow(this.web3.utils.toBN(inputTokenDecimals))))) break;
+                        var orderInputAmountBN = maxInputAmountBN.sub(totalInputAmountBN).lte(orderMaxInputAmountBN) ? maxInputAmountBN.sub(totalInputAmountBN) : orderMaxInputAmountBN;
+                        totalInputAmountBN.iadd(orderInputAmountBN);
+                        takerAssetFilledAmountBN.iadd(orderInputAmountBN.mul(takerAssetAmountBN).div(orderMaxInputAmountBN));
+                        orders.push(decoded.orders[i]);
+                        if (totalInputAmountBN.gte(maxInputAmountBN)) break;
                     }
 
-                    if (filledInputAmountBN.isZero()) reject("No orders satisfying minMarginalOutputAmountBN found on 0x swap API");
-                    // TODO: Make sure returned orders are sorted in ascending order of price
-                    resolve([orders, filledInputAmountBN]);
+                    if (takerAssetFilledAmountBN.isZero()) reject("No orders satisfying minMarginalOutputAmountBN found on 0x swap API");
+                    resolve([orders, totalInputAmountBN, decoded.protocolFee, takerAssetFilledAmountBN]);
                 });
             }).on("error", (err) => {
                 reject("Error requesting quote from 0x swap API: " + err.message);

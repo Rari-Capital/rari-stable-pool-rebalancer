@@ -29,6 +29,18 @@ var db = {
             decimals: 18,
             tokenAddress: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
             usdRate: 0
+        },
+        "USDC": {
+            fundManagerContractBalanceBN: web3.utils.toBN(0),
+            decimals: 6,
+            tokenAddress: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            usdRate: 0
+        },
+        "USDT": {
+            fundManagerContractBalanceBN: web3.utils.toBN(0),
+            decimals: 6,
+            tokenAddress: "0xdac17f958d2ee523a2206206994597c13d831ec7",
+            usdRate: 0
         }
     },
     pools: {
@@ -37,12 +49,24 @@ var db = {
                 "DAI": {
                     poolBalanceBN: web3.utils.toBN(0),
                     supplyApr: 0
+                },
+                "USDC": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
                 }
             }
         },
         "Compound": {
             currencies: {
                 "DAI": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "USDC": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "USDT": {
                     poolBalanceBN: web3.utils.toBN(0),
                     supplyApr: 0
                 }
@@ -66,7 +90,7 @@ async function onLoad() {
     await updateCurrencyUsdRates();
     setInterval(function() { updateCurrencyUsdRates(); }, (process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS ? parseFloat(process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS) : 60) * 1000);
 
-    // Set max token allowances to pools
+    // Set max token allowances to pools and 0x
     await setMaxTokenAllowances();
 
     // Start cycle of checking wallet balances and pool APRs and trying to balance supply of all currencies
@@ -166,19 +190,33 @@ async function getAllAprs() {
 async function setMaxTokenAllowances(unset = false) {
     for (const poolName of Object.keys(db.pools))
         for (const currencyCode of Object.keys(db.pools[poolName].currencies))
-            setMaxTokenAllowance(poolName, currencyCode, unset);
+            setMaxTokenAllowanceToPool(poolName, currencyCode, unset);
+
+    for (const currencyCode of Object.keys(db.currencies)) setMaxTokenAllowanceTo0x(currencyCode, unset);
 }
 
-async function setMaxTokenAllowance(poolName, currencyCode, unset = false) {
+async function setMaxTokenAllowanceToPool(poolName, currencyCode, unset = false) {
     console.log("Setting " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on", poolName);
 
     try {
-        var txid = await approveFunds(poolName, currencyCode, unset ? web3.utils.toBN(0) : web3.utils.toBN(2).pow(web3.utils.toBN(256)).sub(web3.utils.toBN(1)));
+        var txid = await approveFundsToPool(poolName, currencyCode, unset ? web3.utils.toBN(0) : web3.utils.toBN(2).pow(web3.utils.toBN(256)).sub(web3.utils.toBN(1)));
     } catch (error) {
         console.log("Failed to set " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on", poolName);
     }
     
     console.log((unset ? "Zero" : "Max") + " token allowance set successfully for", currencyCode, "on", poolName, ":", txid);
+}
+
+async function setMaxTokenAllowanceTo0x(currencyCode, unset = false) {
+    console.log("Setting " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on 0x");
+
+    try {
+        var txid = await approveFundsTo0x(currencyCode, unset ? web3.utils.toBN(0) : web3.utils.toBN(2).pow(web3.utils.toBN(256)).sub(web3.utils.toBN(1)));
+    } catch (error) {
+        console.log("Failed to set " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on 0x");
+    }
+    
+    console.log((unset ? "Zero" : "Max") + " token allowance set successfully for", currencyCode, "on 0x:", txid);
 }
 
 /* CURRENCY USD RATE UPDATING */
@@ -253,12 +291,13 @@ function getBestPoolByCurrency(currencyCode) {
 }
 
 function getRawTotalBalanceBN(currencyCode) {
-    // Calculate totalBalance: start with fundManagerContractBalanceBN
+    // Calculate raw total balance of this currency: start with fundManagerContractBalanceBN
     var totalBalanceBN = db.currencies[currencyCode].fundManagerContractBalanceBN;
 
-    // Add pool balances to totalBalance
+    // Add pool balances to totalBalanceBN
     for (const poolName of Object.keys(db.pools))
-        if (db.pools[poolName].currencies[currencyCode]) totalBalanceBN.iadd(db.pools[poolName].currencies[currencyCode].poolBalanceBN);
+        if (db.pools[poolName].currencies[currencyCode])
+            totalBalanceBN.iadd(db.pools[poolName].currencies[currencyCode].poolBalanceBN);
 
     return totalBalanceBN;
 }
@@ -355,7 +394,7 @@ async function tryBalanceSupply() {
 
             // Get estimated filled input amount from 0x swap API
             try {
-                var [orders, estimatedInputAmountBN] = await zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
+                var [orders, estimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN] = await zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
             } catch (error) {
                 db.isBalancingSupply = false;
                 return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
@@ -381,12 +420,12 @@ async function tryBalanceSupply() {
                 db.pools[poolName].currencies[currencyCode].poolBalanceBN.isub(withdrawalAmountBN);
                 db.currencies[currencyCode].fundManagerContractBalanceBN.iadd(withdrawalAmountBN);
 
-                if (db.currencies[currencyCode].fundManagerContractBalanceBN.eq(estimatedInputAmountBN)) break;
+                if (db.currencies[currencyCode].fundManagerContractBalanceBN.gte(estimatedInputAmountBN)) break;
             }
 
             // Exchange tokens!
             try {
-                var txid = await exchangeFunds(currencyCode, bestCurrencyCode, db.currencies[currencyCode].fundManagerContractBalanceBN, minMarginalOutputAmountBN);
+                var txid = await exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee));
             } catch (error) {
                 throw "Failed to exchange " + currencyCode + " to " + bestCurrencyCode + " when balancing supply: " + error;
             }
@@ -603,7 +642,7 @@ async function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerF
     db.currencies[currencyCode].fundManagerContractBalanceBN = db.currencies[currencyCode].fundManagerContractBalanceBN.sub(totalBalanceDifferenceBN);
 }
 
-async function approveFunds(poolName, currencyCode, amountBN) {
+async function approveFundsToPool(poolName, currencyCode, amountBN) {
     var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
 
     // Create depositToPool transaction
@@ -729,22 +768,11 @@ async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) 
     return sentTx;
 }
 
-async function exchangeFunds(inputCurrencyCode, outputCurrencyCode, maxInputAmountBN, minMarginalOutputAmountBN) {
-    // Get orders from 0x swap API
-    try {
-        var [orders, filledInputAmountBN] = await zeroExExchange.getSwapOrders(db.currencies[inputCurrencyCode].tokenAddress, db.currencies[outputCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
-    } catch (error) {
-        throw "Failed to get orders from 0x swap API for fill0xOrdersUpTo to exchange " + inputCurrencyCode + " to " + outputCurrencyCode + ": " + error;
-    }
-
-    var signatures = [];
-    for (var i = 0; i < orders.length; i++) signatures.push(orders[i].signature);
-
-    // Instansiate FundManagerContract
+async function approveFundsTo0x(currencyCode, amountBN) {
     var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
 
-    // Create fill0xOrdersUpTo transaction
-    var data = fundManagerContract.methods.fill0xOrdersUpTo(orders, signatures, maxInputAmountBN, minMarginalOutputAmountBN).encodeABI();
+    // Create depositToPool transaction
+    var data = fundManagerContract.methods.approveTo0x(currencyCode, amountBN).encodeABI();
 
     // Build transaction
     var tx = {
@@ -755,7 +783,74 @@ async function exchangeFunds(inputCurrencyCode, outputCurrencyCode, maxInputAmou
         nonce: await web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
     };
 
-    if (process.env.NODE_ENV !== "production") console.log("Exchanging up to", maxInputAmountBN.toString(), inputCurrencyCode, "to", outputCurrencyCode, "at a minimum marginal output amount of", minMarginalOutputAmountBN.toString(), ":", tx);
+    if (process.env.NODE_ENV !== "production") console.log("Approving", amountBN.toString(), currencyCode, "funds to 0x:", tx);
+
+    // Estimate gas for transaction
+    try {
+        tx["gas"] = await web3.eth.estimateGas(tx);
+    } catch (error) {
+        throw "Failed to estimate gas before signing and sending transaction for approveTo0x of " + currencyCode + ": " + error;
+    }
+    
+    // Sign transaction
+    try {
+        var signedTx = await web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
+    } catch (error) {
+        throw "Error signing transaction for approveTo0x of " + currencyCode + ": " + error;
+    }
+
+    // Send transaction
+    try {
+        var sentTx = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+    } catch (error) {
+        throw "Error sending transaction for approveTo0x of " + currencyCode + ": " + error;
+    }
+    
+    console.log("Successfully approved", currencyCode, "funds to 0x:", sentTx);
+    return sentTx;
+}
+
+async function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFillAmountBN, orders, protocolFeeBN) {
+    // Build array of orders and signatures
+    var signatures = [];
+
+    for (var i = 0; i < orders.length; i++) {
+        signatures[i] = orders[i].signature;
+
+        orders[i] = {
+            makerAddress: orders[i].makerAddress,
+            takerAddress: orders[i].takerAddress,
+            feeRecipientAddress: orders[i].feeRecipientAddress,
+            senderAddress: orders[i].senderAddress,
+            makerAssetAmount: orders[i].makerAssetAmount,
+            takerAssetAmount: orders[i].takerAssetAmount,
+            makerFee: orders[i].makerFee,
+            takerFee: orders[i].takerFee,
+            expirationTimeSeconds: orders[i].expirationTimeSeconds,
+            salt: orders[i].salt,
+            makerAssetData: orders[i].makerAssetData,
+            takerAssetData: orders[i].takerAssetData,
+            makerFeeAssetData: orders[i].makerFeeAssetData,
+            takerFeeAssetData: orders[i].takerFeeAssetData
+        };
+    }
+
+    // Instansiate FundManagerContract
+    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+
+    // Create fill0xOrdersUpTo transaction
+    var data = fundManagerContract.methods.fill0xOrdersUpTo(inputCurrencyCode, outputCurrencyCode, orders, signatures, takerAssetFillAmountBN).encodeABI();
+
+    // Build transaction
+    var tx = {
+        from: process.env.ETHEREUM_ADMIN_ACCOUNT,
+        to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
+        value: protocolFeeBN,
+        data: data,
+        nonce: await web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
+    };
+
+    if (process.env.NODE_ENV !== "production") console.log("Exchanging up to", takerAssetFillAmountBN.toString(), inputCurrencyCode, "to", outputCurrencyCode, ":", tx);
 
     // Estimate gas for transaction
     try {

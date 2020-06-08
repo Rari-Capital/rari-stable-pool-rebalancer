@@ -23,17 +23,22 @@ var web3 = new Web3(new Web3.providers.HttpProvider(process.env.INFURA_ENDPOINT_
 var dydxProtocol = new dydx_1.default(web3);
 var compoundProtocol = new compound_1.default(web3);
 var currencyCodesByPool = {
-    "dYdX": ["DAI"],
-    "Compound": ["DAI"]
+    "dYdX": ["DAI", "USDC"],
+    "Compound": ["DAI", "USDC", "USDT"]
 };
-assert(currencyCodesByPool[process.argv[2]]);
-for (var i = 0; i < currencyCodesByPool[process.argv[2]].length; i++)
-    unsetTokenAllowance(process.argv[2], currencyCodesByPool[process.argv[2]][i]);
-function unsetTokenAllowance(poolName, currencyCode) {
+if (process.argv[2] === "0x") {
+    unsetTokenAllowanceTo0x(currencyCodesByPool[process.argv[2]][i]);
+}
+else {
+    assert(currencyCodesByPool[process.argv[2]]);
+    for (var i = 0; i < currencyCodesByPool[process.argv[2]].length; i++)
+        unsetTokenAllowanceToPool(process.argv[2], currencyCodesByPool[process.argv[2]][i]);
+}
+function unsetTokenAllowanceToPool(poolName, currencyCode) {
     return __awaiter(this, void 0, void 0, function* () {
         console.log("Setting zero token allowance for", currencyCode, "on", poolName);
         try {
-            var txid = yield approveFunds(poolName, currencyCode, web3.utils.toBN(0));
+            var txid = yield approveFundsToPool(poolName, currencyCode, web3.utils.toBN(0));
         }
         catch (error) {
             console.log("Failed to set zero token allowance for", currencyCode, "on", poolName);
@@ -41,7 +46,19 @@ function unsetTokenAllowance(poolName, currencyCode) {
         console.log("Zero token allowance set successfully for", currencyCode, "on", poolName, ":", txid);
     });
 }
-function approveFunds(poolName, currencyCode, amountBN) {
+function unsetTokenAllowanceTo0x(currencyCode) {
+    return __awaiter(this, void 0, void 0, function* () {
+        console.log("Setting zero token allowance for", currencyCode, "on 0x");
+        try {
+            var txid = yield approveFundsTo0x(currencyCode, web3.utils.toBN(0));
+        }
+        catch (error) {
+            console.log("Failed to set zero token allowance for", currencyCode, "on 0x");
+        }
+        console.log("Zero token allowance set successfully for", currencyCode, "on 0x:", txid);
+    });
+}
+function approveFundsToPool(poolName, currencyCode, amountBN) {
     return __awaiter(this, void 0, void 0, function* () {
         var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
         // Create depositToPool transaction
@@ -78,6 +95,46 @@ function approveFunds(poolName, currencyCode, amountBN) {
             throw "Error sending transaction for approveToPool of " + currencyCode + " to " + poolName + ": " + error;
         }
         console.log("Successfully approved", currencyCode, "funds to", poolName, ":", sentTx);
+        return sentTx;
+    });
+}
+function approveFundsTo0x(currencyCode, amountBN) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+        // Create depositToPool transaction
+        var data = fundManagerContract.methods.approveTo0x(currencyCode, amountBN).encodeABI();
+        // Build transaction
+        var tx = {
+            from: process.env.ETHEREUM_ADMIN_ACCOUNT,
+            to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
+            value: 0,
+            data: data,
+            nonce: yield web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
+        };
+        if (process.env.NODE_ENV !== "production")
+            console.log("Approving", amountBN.toString(), currencyCode, "funds to 0x:", tx);
+        // Estimate gas for transaction
+        try {
+            tx["gas"] = yield web3.eth.estimateGas(tx);
+        }
+        catch (error) {
+            throw "Failed to estimate gas before signing and sending transaction for approveTo0x of " + currencyCode + ": " + error;
+        }
+        // Sign transaction
+        try {
+            var signedTx = yield web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
+        }
+        catch (error) {
+            throw "Error signing transaction for approveTo0x of " + currencyCode + ": " + error;
+        }
+        // Send transaction
+        try {
+            var sentTx = yield web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+        }
+        catch (error) {
+            throw "Error sending transaction for approveTo0x of " + currencyCode + ": " + error;
+        }
+        console.log("Successfully approved", currencyCode, "funds to 0x:", sentTx);
         return sentTx;
     });
 }
