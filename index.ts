@@ -369,11 +369,13 @@ async function predictBalanceDifferenceBN(currencyCode, poolName, targetApr, apr
     for (var i = 0; i < 10; i++) {
         if (Math.abs(targetApr - aprAtEstimatedBalanceDifference) <= targetApr / 100) break;
         estimatedBalanceDifferenceBN = estimatedBalanceDifferenceBN.div(currentApr - aprAtEstimatedBalanceDifference).mul(currentApr - targetApr);
+        aprAtEstimatedBalanceDifference = await predictApr(currencyCode, poolName, estimatedBalanceDifferenceBN);
     }
 
     return estimatedBalanceDifferenceBN;
 }
 
+// TODO: Implement proportional currency rebalancing using APR predictions
 /* async function getIdealBalancesAllCurrencies(totalBalanceDifferenceUsdBN = web3.utils.toBN(0)) {
     // Get total USD balance
     var totalUsdBN = getRawCombinedUsdBalanceBN();
@@ -438,7 +440,7 @@ async function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN
     totalBN.iadd(totalBalanceDifferenceBN);
     if (totalBN.isNeg()) throw "Total balance would be negative";
 
-    // Sort all currency-pool combinations by highest to lowest supply rate
+    // Sort all pools for this currency by highest to lowest supply rate
     var pools = [];
     for (const poolName of Object.keys(db.pools))
         if (db.pools[poolName].currencies[currencyCode])
@@ -449,37 +451,37 @@ async function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN
     // Calculate balance differences and balances
     for (var i = 0; i < pools.length; i++) {
         var minApr = pools[i + 1] ? pools[i + 1].supplyApr : 0;
-        var maxBalanceDifference = totalBN.toString() / db.currencies[pools[i].currencyCode].usdRate;
+        var maxBalanceDifferenceBN = totalBN.sub(db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN);
 
-        // Predict APR at maxBalanceDifference
+        // Predict APR at maxBalanceDifferenceBN
         try {
-            var predictedApr = await predictApr(currencyCode, pools[i].poolName, web3.utils.toBN(maxBalanceDifference));
+            var predictedApr = await predictApr(currencyCode, pools[i].poolName, maxBalanceDifferenceBN);
         } catch {
             throw "Failed to predict APR";
         }
 
         if (predictedApr >= minApr) {
             // Set balance difference to maximum since predicted APR is not below the minimum
-            pools[i].balanceDifferenceBN = web3.utils.toBN(maxBalanceDifference);
+            pools[i].balanceDifferenceBN = maxBalanceDifferenceBN;
             pools[i].balanceBN = db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN.add(pools[i].balanceDifferenceBN);
 
             // Set other pools' balances to 0 and return
             for (var j = i + 1; j < pools.length; j++) {
+                pools[j].balanceBN = web3.utils.toBN(0);
                 pools[j].balanceDifferenceBN = web3.utils.toBN(0).sub(db.pools[pools[j].poolName].currencies[currencyCode].poolBalanceBN);
-                pools[j].balanceBN = 0;
             }
 
             return pools;
         } else {
             // Predict balance difference necessary to equalize APR with the next highest
             try {
-                pools[i].balanceDifferenceBN = await predictBalanceDifferenceBN(currencyCode, pools[i].poolName, minApr, predictedApr, web3.utils.toBN(maxBalanceDifference));
+                pools[i].balanceDifferenceBN = await predictBalanceDifferenceBN(currencyCode, pools[i].poolName, minApr, predictedApr, maxBalanceDifferenceBN);
             } catch {
                 throw "Failed to predict balance difference";
             }
 
             pools[i].balanceBN = db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN.add(pools[i].balanceDifferenceBN);
-            totalBN.isubn(pools[i].balanceDifferenceBN.toString() * db.currencies[currencyCode].usdRate);
+            totalBN.isubn(pools[i].balanceBN.toString());
         }
     }
 
@@ -555,6 +557,7 @@ async function tryBalanceSupply() {
     console.log("Trying to balance supply");
 
     // Get best currency and pool for potential currency exchange
+    // TODO: Implement proportional currency rebalancing using APR predictions
     try {
         var [bestCurrencyCode, bestPoolName, bestApr] = await getBestCurrencyAndPool();
     } catch (error) {

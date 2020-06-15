@@ -20,7 +20,6 @@ class ZeroExExchange {
                         reject("Failed to decode prices from 0x swap API");
                     if (!decoded.records)
                         reject("No prices found on 0x swap API");
-                    // TODO: Make sure orders from API are sorted in ascending order of price
                     for (var i = 0; i < decoded.records.length; i++)
                         if (decoded.records[i].symbol === outputTokenSymbol)
                             resolve(decoded.records[i].price);
