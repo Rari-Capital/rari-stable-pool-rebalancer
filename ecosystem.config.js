@@ -22,7 +22,8 @@ module.exports = {
       AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING: 1.0, // The maximum amount of slippage including exchange fees (from 0 to 1) per addition of APR (from 0 to 1) per the number of seconds since the last rebalancing; in theory, max slippage per APR increase per year since last rebalancing is 1 (right?)
       WITHDRAWAL_QUEUE_ENABLED: 1,
       UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS: 30 * 60,
-      CLAIM_INTEREST_FEES_INTERVAL_SECONDS: 86400
+      CLAIM_INTEREST_FEES_INTERVAL_SECONDS: 86400,
+      OWNER_WITHDRAW_INTERVAL_SECONDS: 86400
     },
     env_production: {
       NODE_ENV: 'production',
@@ -37,7 +38,8 @@ module.exports = {
       AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING: 1.0, // The maximum amount of slippage including exchange fees (from 0 to 1) per addition of APR (from 0 to 1) per the number of seconds since the last rebalancing; in theory, max slippage per APR increase per year since last rebalancing is 1 (right?)
       WITHDRAWAL_QUEUE_ENABLED: 1,
       UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS: 30 * 60,
-      CLAIM_INTEREST_FEES_INTERVAL_SECONDS: 86400
+      CLAIM_INTEREST_FEES_INTERVAL_SECONDS: 86400,
+      OWNER_WITHDRAW_INTERVAL_SECONDS: 86400
     }
   }]
 };

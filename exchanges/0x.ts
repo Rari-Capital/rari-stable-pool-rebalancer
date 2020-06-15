@@ -8,7 +8,7 @@ export default class ZeroExExchange {
         this.web3 = web3;
     }
 
-    async getPrice(inputTokenSymbol, outputTokenSymbol): Promise<string> {
+    getPrice(inputTokenSymbol, outputTokenSymbol): Promise<string> {
         return new Promise((resolve, reject) => {
             https.get('https://api.0x.org/swap/v0/prices?sellToken=' + inputTokenSymbol, (resp) => {
                 let data = '';
@@ -37,7 +37,7 @@ export default class ZeroExExchange {
         });
     }
 
-    async getSwapOrders(inputTokenAddress, inputTokenDecimals, outputTokenAddress, maxInputAmountBN, minMarginalOutputAmountBN): Promise<[any[], any, any, any]> {
+    getSwapOrders(inputTokenAddress, inputTokenDecimals, outputTokenAddress, maxInputAmountBN, minMarginalOutputAmountBN): Promise<[any[], any, any, any]> {
         return new Promise((resolve, reject) => {
             https.get('https://api.0x.org/swap/v0/quote?sellToken=' + inputTokenAddress + '&buyToken=' + outputTokenAddress + '&sellAmount=' + maxInputAmountBN.toString(), (resp) => {
                 let data = '';

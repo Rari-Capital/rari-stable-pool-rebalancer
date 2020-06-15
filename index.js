@@ -38,6 +38,18 @@ var db = {
             decimals: 18,
             tokenAddress: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
             usdRate: 0
+        },
+        "USDC": {
+            fundManagerContractBalanceBN: web3.utils.toBN(0),
+            decimals: 6,
+            tokenAddress: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            usdRate: 0
+        },
+        "USDT": {
+            fundManagerContractBalanceBN: web3.utils.toBN(0),
+            decimals: 6,
+            tokenAddress: "0xdac17f958d2ee523a2206206994597c13d831ec7",
+            usdRate: 0
         }
     },
     pools: {
@@ -46,12 +58,24 @@ var db = {
                 "DAI": {
                     poolBalanceBN: web3.utils.toBN(0),
                     supplyApr: 0
+                },
+                "USDC": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
                 }
             }
         },
         "Compound": {
             currencies: {
                 "DAI": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "USDC": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "USDT": {
                     poolBalanceBN: web3.utils.toBN(0),
                     supplyApr: 0
                 }
@@ -76,13 +100,108 @@ function onLoad() {
         // Start updating USD rates regularly
         yield updateCurrencyUsdRates();
         setInterval(function () { updateCurrencyUsdRates(); }, (process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS ? parseFloat(process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS) : 60) * 1000);
-        // Set max token allowances to pools
+        // Start claiming interest fees regularly
+        yield depositInterestFees();
+        setInterval(function () { depositInterestFees(); }, (process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS ? parseFloat(process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS) : 86400) * 1000);
+        // Start withdrawing ETH and COMP regularly
+        yield ownerWithdrawAllCurrencies();
+        setInterval(function () { ownerWithdrawAllCurrencies(); }, (process.env.OWNER_WITHDRAW_INTERVAL_SECONDS ? parseFloat(process.env.OWNER_WITHDRAW_INTERVAL_SECONDS) : 86400) * 1000);
+        // Set max token allowances to pools and 0x
         yield setMaxTokenAllowances();
         // Start cycle of checking wallet balances and pool APRs and trying to balance supply of all currencies
         doCycle();
     });
 }
 onLoad();
+/* CLAIMING INTEREST FEES */
+function depositInterestFees() {
+    return __awaiter(this, void 0, void 0, function* () {
+        var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+        // Create depositFees transaction
+        var data = fundManagerContract.methods.depositFees().encodeABI();
+        // Build transaction
+        var tx = {
+            from: process.env.ETHEREUM_ADMIN_ACCOUNT,
+            to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
+            value: 0,
+            data: data,
+            nonce: yield web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
+        };
+        if (process.env.NODE_ENV !== "production")
+            console.log("Depositing fees back into fund manager:", tx);
+        // Estimate gas for transaction
+        try {
+            tx["gas"] = yield web3.eth.estimateGas(tx);
+        }
+        catch (error) {
+            throw "Failed to estimate gas before signing and sending transaction for depositFees: " + error;
+        }
+        // Sign transaction
+        try {
+            var signedTx = yield web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
+        }
+        catch (error) {
+            throw "Error signing transaction for depositFees: " + error;
+        }
+        // Send transaction
+        try {
+            var sentTx = yield web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+        }
+        catch (error) {
+            throw "Error sending transaction for depositFees: " + error;
+        }
+        console.log("Successfully deposited fees back into fund manager:", sentTx);
+        return sentTx;
+    });
+}
+/* OWNER WITHDRAWALS */
+function ownerWithdrawAllCurrencies() {
+    return __awaiter(this, void 0, void 0, function* () {
+        // TODO: Put currencies withdrawable by the owner in an array
+        yield ownerWithdrawCurrency("ETH");
+        yield ownerWithdrawCurrency("COMP");
+    });
+}
+function ownerWithdrawCurrency(currencyCode) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+        // Create depositFees transaction
+        var data = fundManagerContract.methods.ownerWithdraw(currencyCode).encodeABI();
+        // Build transaction
+        var tx = {
+            from: process.env.ETHEREUM_ADMIN_ACCOUNT,
+            to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
+            value: 0,
+            data: data,
+            nonce: yield web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
+        };
+        if (process.env.NODE_ENV !== "production")
+            console.log("Withdrawing", currencyCode, "from fund manager to owner:", tx);
+        // Estimate gas for transaction
+        try {
+            tx["gas"] = yield web3.eth.estimateGas(tx);
+        }
+        catch (error) {
+            throw "Failed to estimate gas before signing and sending transaction for ownerWithdraw: " + error;
+        }
+        // Sign transaction
+        try {
+            var signedTx = yield web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
+        }
+        catch (error) {
+            throw "Error signing transaction for ownerWithdraw: " + error;
+        }
+        // Send transaction
+        try {
+            var sentTx = yield web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+        }
+        catch (error) {
+            throw "Error sending transaction for ownerWithdraw: " + error;
+        }
+        console.log("Successfully withdrew", currencyCode, "from fund manager to owner:", sentTx);
+        return sentTx;
+    });
+}
 /* SETTING ACCEPTED CURRENCIES */
 function setAcceptedCurrencies() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -177,19 +296,33 @@ function setMaxTokenAllowances(unset = false) {
     return __awaiter(this, void 0, void 0, function* () {
         for (const poolName of Object.keys(db.pools))
             for (const currencyCode of Object.keys(db.pools[poolName].currencies))
-                setMaxTokenAllowance(poolName, currencyCode, unset);
+                setMaxTokenAllowanceToPool(poolName, currencyCode, unset);
+        for (const currencyCode of Object.keys(db.currencies))
+            setMaxTokenAllowanceTo0x(currencyCode, unset);
     });
 }
-function setMaxTokenAllowance(poolName, currencyCode, unset = false) {
+function setMaxTokenAllowanceToPool(poolName, currencyCode, unset = false) {
     return __awaiter(this, void 0, void 0, function* () {
         console.log("Setting " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on", poolName);
         try {
-            var txid = yield approveFunds(poolName, currencyCode, unset ? web3.utils.toBN(0) : web3.utils.toBN(2).pow(web3.utils.toBN(256)).sub(web3.utils.toBN(1)));
+            var txid = yield approveFundsToPool(poolName, currencyCode, unset ? web3.utils.toBN(0) : web3.utils.toBN(2).pow(web3.utils.toBN(256)).sub(web3.utils.toBN(1)));
         }
         catch (error) {
             console.log("Failed to set " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on", poolName);
         }
         console.log((unset ? "Zero" : "Max") + " token allowance set successfully for", currencyCode, "on", poolName, ":", txid);
+    });
+}
+function setMaxTokenAllowanceTo0x(currencyCode, unset = false) {
+    return __awaiter(this, void 0, void 0, function* () {
+        console.log("Setting " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on 0x");
+        try {
+            var txid = yield approveFundsTo0x(currencyCode, unset ? web3.utils.toBN(0) : web3.utils.toBN(2).pow(web3.utils.toBN(256)).sub(web3.utils.toBN(1)));
+        }
+        catch (error) {
+            console.log("Failed to set " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on 0x");
+        }
+        console.log((unset ? "Zero" : "Max") + " token allowance set successfully for", currencyCode, "on 0x:", txid);
     });
 }
 /* CURRENCY USD RATE UPDATING */
@@ -221,6 +354,138 @@ function updateCurrencyUsdRates() {
     });
 }
 /* POOL BALANCING */
+function predictApr(currencyCode, poolName, balanceDifferenceBN) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (poolName === "dYdX")
+            return yield dydxProtocol.predictApr(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
+        else if (poolName == "Compound")
+            return yield compoundProtocol.predictApr(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
+        else
+            throw "Failed to predict APR for unrecognized pool: " + poolName;
+    });
+}
+function predictBalanceDifferenceBN(currencyCode, poolName, targetApr, aprAtEstimatedBalanceDifference, estimatedBalanceDifferenceBN) {
+    return __awaiter(this, void 0, void 0, function* () {
+        // Keep guessing: estimatedBalanceDifference = estimatedBalanceDifference / (currentApr - aprAtEstimatedBalanceDifference) * (currentApr - targetApr)
+        // Return estimatedBalanceDifference once aprAtEstimatedBalanceDifference is within 1% of targetApr or if we get stuck in a loop
+        // TODO: Come up with a better way to avoid getting stuck in a loop than limiting the number of estimates to 10
+        var currentApr = db.pools[poolName].currencies[currencyCode].supplyApr;
+        for (var i = 0; i < 10; i++) {
+            if (Math.abs(targetApr - aprAtEstimatedBalanceDifference) <= targetApr / 100)
+                break;
+            estimatedBalanceDifferenceBN = estimatedBalanceDifferenceBN.div(currentApr - aprAtEstimatedBalanceDifference).mul(currentApr - targetApr);
+        }
+        return estimatedBalanceDifferenceBN;
+    });
+}
+/* async function getIdealBalancesAllCurrencies(totalBalanceDifferenceUsdBN = web3.utils.toBN(0)) {
+    // Get total USD balance
+    var totalUsdBN = getRawCombinedUsdBalanceBN();
+    
+    // Add difference to totalBalance if supplied to this function
+    totalUsdBN.iadd(totalBalanceDifferenceUsdBN);
+    if (totalUsdBN.isNeg()) throw "Total balance would be negative";
+
+    // Sort all currency-pool combinations by highest to lowest supply rate
+    var currencyPoolCombinations = [];
+    for (const poolName of Object.keys(db.pools))
+        for (const currencyCode of Object.keys(db.pools[poolName].currencies))
+            currencyPoolCombinations.push({ currencyCode, poolName, supplyApr: db.pools[poolName].currencies[currencyCode].supplyApr });
+    if (currencyPoolCombinations.length <= 1) return currencyPoolCombinations;
+    currencyPoolCombinations.sort((a, b) => (a.supplyApr < b.supplyApr) ? 1 : -1);
+
+    // Calculate balance differences and balances
+    for (var i = 0; i < currencyPoolCombinations.length; i++) {
+        var minApr = currencyPoolCombinations[i + 1] ? currencyPoolCombinations[i + 1].supplyApr : 0;
+        var maxBalanceDifference = parseInt(totalUsdBN.toString()) / db.currencies[currencyPoolCombinations[i].currencyCode].usdRate;
+
+        // Predict APR at maxBalanceDifference
+        try {
+            var predictedApr = await predictApr(currencyPoolCombinations[i].currencyCode, currencyPoolCombinations[i].poolName, web3.utils.toBN(maxBalanceDifference));
+        } catch {
+            throw "Failed to predict APR";
+        }
+
+        if (predictedApr >= minApr) {
+            // Set balance difference to maximum since predicted APR is not below the minimum
+            currencyPoolCombinations[i].balanceDifferenceBN = web3.utils.toBN(maxBalanceDifference);
+            currencyPoolCombinations[i].balanceBN = db.pools[currencyPoolCombinations[i].poolName].currencies[currencyPoolCombinations[i].currencyCode].poolBalanceBN.add(currencyPoolCombinations[i].balanceDifferenceBN);
+
+            // Set other pools' balances to 0 and return
+            for (var j = i + 1; j < currencyPoolCombinations.length; j++) {
+                currencyPoolCombinations[j].balanceDifferenceBN = web3.utils.toBN(0).sub(db.pools[currencyPoolCombinations[j].poolName].currencies[currencyPoolCombinations[j].currencyCode].poolBalanceBN);
+                currencyPoolCombinations[j].balanceBN = 0;
+            }
+
+            return currencyPoolCombinations;
+        } else {
+            // Predict balance difference necessary to equalize APR with the next highest
+            try {
+                currencyPoolCombinations[i].balanceDifferenceBN = await predictBalanceDifferenceBN(currencyPoolCombinations[i].currencyCode, currencyPoolCombinations[i].poolName, minApr, predictedApr, web3.utils.toBN(maxBalanceDifference));
+            } catch {
+                throw "Failed to predict balance difference";
+            }
+
+            currencyPoolCombinations[i].balanceBN = db.pools[currencyPoolCombinations[i].poolName].currencies[currencyPoolCombinations[i].currencyCode].poolBalanceBN.add(currencyPoolCombinations[i].balanceDifferenceBN);
+            totalUsdBN.isubn(currencyPoolCombinations[i].balanceDifferenceBN.toString() * db.currencies[currencyPoolCombinations[i].currencyCode].usdRate);
+        }
+    }
+
+    return currencyPoolCombinations;
+} */
+function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN = web3.utils.toBN(0)) {
+    return __awaiter(this, void 0, void 0, function* () {
+        // Get total balance of this currency
+        var totalBN = getRawTotalBalanceBN(currencyCode);
+        // Add difference to totalBalance if supplied to this function
+        totalBN.iadd(totalBalanceDifferenceBN);
+        if (totalBN.isNeg())
+            throw "Total balance would be negative";
+        // Sort all currency-pool combinations by highest to lowest supply rate
+        var pools = [];
+        for (const poolName of Object.keys(db.pools))
+            if (db.pools[poolName].currencies[currencyCode])
+                pools.push({ poolName, supplyApr: db.pools[poolName].currencies[currencyCode].supplyApr });
+        if (pools.length <= 1)
+            return pools;
+        pools.sort((a, b) => (a.supplyApr < b.supplyApr) ? 1 : -1);
+        // Calculate balance differences and balances
+        for (var i = 0; i < pools.length; i++) {
+            var minApr = pools[i + 1] ? pools[i + 1].supplyApr : 0;
+            var maxBalanceDifference = totalBN.toString() / db.currencies[pools[i].currencyCode].usdRate;
+            // Predict APR at maxBalanceDifference
+            try {
+                var predictedApr = yield predictApr(currencyCode, pools[i].poolName, web3.utils.toBN(maxBalanceDifference));
+            }
+            catch (_a) {
+                throw "Failed to predict APR";
+            }
+            if (predictedApr >= minApr) {
+                // Set balance difference to maximum since predicted APR is not below the minimum
+                pools[i].balanceDifferenceBN = web3.utils.toBN(maxBalanceDifference);
+                pools[i].balanceBN = db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN.add(pools[i].balanceDifferenceBN);
+                // Set other pools' balances to 0 and return
+                for (var j = i + 1; j < pools.length; j++) {
+                    pools[j].balanceDifferenceBN = web3.utils.toBN(0).sub(db.pools[pools[j].poolName].currencies[currencyCode].poolBalanceBN);
+                    pools[j].balanceBN = 0;
+                }
+                return pools;
+            }
+            else {
+                // Predict balance difference necessary to equalize APR with the next highest
+                try {
+                    pools[i].balanceDifferenceBN = yield predictBalanceDifferenceBN(currencyCode, pools[i].poolName, minApr, predictedApr, web3.utils.toBN(maxBalanceDifference));
+                }
+                catch (_b) {
+                    throw "Failed to predict balance difference";
+                }
+                pools[i].balanceBN = db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN.add(pools[i].balanceDifferenceBN);
+                totalBN.isubn(pools[i].balanceDifferenceBN.toString() * db.currencies[currencyCode].usdRate);
+            }
+        }
+        return pools;
+    });
+}
 function getBestCurrencyAndPool() {
     return __awaiter(this, void 0, void 0, function* () {
         // Find best currency and pool (to put entire balance in)
@@ -256,51 +521,25 @@ function getBestPoolByCurrency(currencyCode) {
     return [bestPoolName, bestPoolApr];
 }
 function getRawTotalBalanceBN(currencyCode) {
-    // Calculate totalBalance: start with fundManagerContractBalanceBN
+    // Calculate raw total balance of this currency: start with fundManagerContractBalanceBN
     var totalBalanceBN = db.currencies[currencyCode].fundManagerContractBalanceBN;
-    // Add pool balances to totalBalance
+    // Add pool balances to totalBalanceBN
     for (const poolName of Object.keys(db.pools))
         if (db.pools[poolName].currencies[currencyCode])
             totalBalanceBN.iadd(db.pools[poolName].currencies[currencyCode].poolBalanceBN);
     return totalBalanceBN;
 }
-function getIdealBalances(currencyCode, totalBalanceDifferenceBN = null) {
-    return __awaiter(this, void 0, void 0, function* () {
-        // TODO: As of now, we simply put all funds in the pool with the highest interest rate and assume that we aren't supplying enough funds to push that rate below another one.
-        // TODO: Ideally, we calculate ideal balances based on current interest rate parameters so that we balance our funds across the pools with the highest rates so that we still receive as much interest as possible even when we have enough total funds to push the best interest rate below the next best.
-        // TODO: Add balance to fund with most APR until that APR hits the second highest, then add balance to both of them, decreasing them both equally, until they hit the third highest
-        // Calculate totalBalance
-        var totalBalanceBN = getRawTotalBalanceBN(currencyCode);
-        // Add difference to totalBalance if supplied to this function
-        if (totalBalanceDifferenceBN !== null)
-            totalBalanceBN.iadd(totalBalanceDifferenceBN);
-        if (totalBalanceBN.isNeg())
-            throw "Total balance would be negative";
-        // Get current currency's APRs for all pools that support it
-        var bestPoolName = null;
-        var bestPoolApr = 0;
-        var bestPoolCurrentBalanceBN = web3.utils.toBN(0);
-        // Find best pool (to put entire balance in)
-        for (const poolName of Object.keys(db.pools)) {
-            if (db.pools[poolName].currencies[currencyCode] && db.pools[poolName].currencies[currencyCode].supplyApr > bestPoolApr) {
-                bestPoolName = poolName;
-                bestPoolApr = db.pools[poolName].currencies[currencyCode].supplyApr;
-                bestPoolCurrentBalanceBN = db.pools[poolName].currencies[currencyCode].poolBalanceBN;
-            }
-        }
-        if (bestPoolName === null)
-            throw "Failed to get best pool";
-        var poolBalances = [
-            { pool: bestPoolName, apr: bestPoolApr, balanceBN: totalBalanceBN, balanceDifferenceBN: totalBalanceBN.sub(bestPoolCurrentBalanceBN) }
-        ];
-        // Set balances to 0 for other pools
-        for (const poolName of Object.keys(db.pools)) {
-            if (poolName !== bestPoolName && db.pools[poolName].currencies[currencyCode])
-                poolBalances.push({ pool: poolName, apr: db.pools[poolName].currencies[currencyCode].supplyApr, balanceBN: web3.utils.toBN(0), balanceDifferenceBN: web3.utils.toBN(0).sub(db.pools[poolName].currencies[currencyCode].poolBalanceBN) });
-        }
-        return poolBalances;
-    });
-}
+/* function getRawCombinedUsdBalanceBN() {
+    // Calculate raw combined USD balance
+    var usdBalanceBN = web3.utils.toBN(0);
+
+    // Add currency balances to usdBalanceBN
+    for (const currencyCode of Object.keys(db.currencies))
+        if (currencyCode !== "ETH")
+            usdBalanceBN.iadd(getRawTotalBalanceBN(currencyCode));
+
+    return usdBalanceBN;
+} */
 function tryBalanceSupply() {
     return __awaiter(this, void 0, void 0, function* () {
         if (db.isBalancingSupply)
@@ -319,22 +558,11 @@ function tryBalanceSupply() {
         // TODO: Get db.lastTimeBalanced from database instead of storing in a variable
         var epoch = (new Date()).getTime() / 1000;
         var secondsSinceLastSupplyBalancing = db.lastTimeBalanced > 0 ? epoch - db.lastTimeBalanced : 86400 * 7;
-        // Array of sumPendingWithdrawalsBN for each currency
-        var sumPendingWithdrawalsBN = {};
-        // Loop through tokens for exchanges
+        // Loop through tokens for exchanges to best currency code
         for (const currencyCode of Object.keys(db.currencies))
-            if (currencyCode !== "ETH") {
-                // Check withdrawals queue
-                sumPendingWithdrawalsBN[currencyCode] = process.env.WITHDRAWAL_QUEUE_ENABLED ? yield getSumPendingWithdrawals(currencyCode) : web3.utils.toBN(0);
-                // Convert a maximum of the currency's raw total balance - sumPendingWithdrawalsBN at a maximum marginal output according to AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING
-                var maxInputAmountBN = getRawTotalBalanceBN(currencyCode).sub(sumPendingWithdrawalsBN[currencyCode]);
-                try {
-                    var [bestPoolNameForThisCurrency, bestAprForThisCurrency] = yield getBestPoolByCurrency(currencyCode);
-                }
-                catch (error) {
-                    db.isBalancingSupply = false;
-                    return console.error("Failed to get best currency and pool when trying to balance supply:", error);
-                }
+            if (currencyCode !== "ETH" && currencyCode !== bestCurrencyCode) {
+                // Convert a maximum of the currency's raw total balance at a maximum marginal output according to AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING
+                var maxInputAmountBN = getRawTotalBalanceBN(currencyCode);
                 if (maxInputAmountBN.gt(web3.utils.toBN(0))) {
                     // Calculate min marginal output amount to exchange funds
                     try {
@@ -344,11 +572,19 @@ function tryBalanceSupply() {
                         db.isBalancingSupply = false;
                         return console.error("Failed to get price from 0x API when trying to balance supply:", error);
                     }
+                    try {
+                        var [bestPoolNameForThisCurrency, bestAprForThisCurrency] = yield getBestPoolByCurrency(currencyCode);
+                    }
+                    catch (error) {
+                        db.isBalancingSupply = false;
+                        return console.error("Failed to get best currency and pool when trying to balance supply:", error);
+                    }
+                    // TODO: Include miner fee and 0x protocol fee in calculation of min marginal output amount
                     var maxMarginalOutputAmount = 1 / parseFloat(price);
                     var minMarginalOutputAmountBN = web3.utils.toBN(maxMarginalOutputAmount * (1 - (parseFloat(process.env.AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING) * (bestApr - bestAprForThisCurrency) * (secondsSinceLastSupplyBalancing / 86400 / 365))) * (Math.pow(10, db.currencies[bestCurrencyCode].decimals)));
                     // Get estimated filled input amount from 0x swap API
                     try {
-                        var [orders, estimatedInputAmountBN] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
+                        var [orders, estimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
                     }
                     catch (error) {
                         db.isBalancingSupply = false;
@@ -358,6 +594,8 @@ function tryBalanceSupply() {
                     var pools = db.currencies[currencyCode].pools.slice();
                     pools.sort((a, b) => (a.supplyApr > b.supplyApr) ? 1 : -1);
                     for (const poolName of Object.keys(pools)) {
+                        if (db.currencies[currencyCode].fundManagerContractBalanceBN.gte(estimatedInputAmountBN))
+                            break;
                         var leftBN = estimatedInputAmountBN.sub(db.currencies[currencyCode].fundManagerContractBalanceBN);
                         var withdrawalAmountBN = leftBN.lte(db.pools[poolName].currencies[currencyCode].poolBalanceBN) ? leftBN : db.pools[poolName].currencies[currencyCode].poolBalanceBN;
                         // TODO: Don't execute a supply removal if not above a threshold
@@ -371,16 +609,36 @@ function tryBalanceSupply() {
                         // Update balances
                         db.pools[poolName].currencies[currencyCode].poolBalanceBN.isub(withdrawalAmountBN);
                         db.currencies[currencyCode].fundManagerContractBalanceBN.iadd(withdrawalAmountBN);
-                        if (db.currencies[currencyCode].fundManagerContractBalanceBN.eq(estimatedInputAmountBN))
-                            break;
                     }
                     // Exchange tokens!
                     try {
-                        var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, db.currencies[currencyCode].fundManagerContractBalanceBN, minMarginalOutputAmountBN);
+                        var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee));
                     }
                     catch (error) {
-                        throw "Failed to exchange " + currencyCode + " to " + bestCurrencyCode + " when balancing supply: " + error;
+                        // Retry up to 2 more times
+                        for (var i = 0; i < 3; i++) {
+                            try {
+                                var [orders, newEstimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, estimatedInputAmountBN, minMarginalOutputAmountBN);
+                            }
+                            catch (error) {
+                                db.isBalancingSupply = false;
+                                return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+                            }
+                            try {
+                                var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee));
+                                break;
+                            }
+                            catch (error) {
+                                // Stop trying on 3rd error
+                                if (i == 3) {
+                                    db.isBalancingSupply = false;
+                                    return console.error("Failed 3 times to exchange", currencyCode, "to", bestCurrencyCode, "when balancing supply:", error);
+                                }
+                            }
+                        }
                     }
+                    yield checkCurrencyBalances(currencyCode);
+                    yield checkCurrencyBalances(bestCurrencyCode);
                 }
             }
         // Loop through tokens again for rebalancing across pools
@@ -388,7 +646,7 @@ function tryBalanceSupply() {
             if (currencyCode !== "ETH") {
                 // Get ideal balances
                 try {
-                    var idealBalances = yield getIdealBalances(currencyCode, web3.utils.toBN(0).sub(sumPendingWithdrawalsBN[currencyCode]));
+                    var idealBalances = yield getIdealBalancesByCurrency(currencyCode);
                 }
                 catch (error) {
                     db.isBalancingSupply = false;
@@ -400,33 +658,28 @@ function tryBalanceSupply() {
                     if (!idealBalances[i].balanceDifferenceBN.isZero())
                         anyChanges = true;
                 if (anyChanges) {
-                    // Check AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE if sumPendingWithdrawalsBN is zero
-                    if (sumPendingWithdrawalsBN[currencyCode].isZero()) {
-                        // Get expected additional yearly interest
-                        var expectedAdditionalYearlyInterest = 0;
-                        for (var i = 0; i < idealBalances.length; i++) {
-                            var balanceDifference = parseInt(idealBalances[i].balanceDifferenceBN.toString()); // TODO: BN.prototype.toNumber replacement
-                            expectedAdditionalYearlyInterest += balanceDifference * idealBalances[i].apr;
-                        }
-                        var expectedAdditionalYearlyInterestUsd = expectedAdditionalYearlyInterest / Math.pow(10, db.currencies[currencyCode].decimals) * db.currencies[currencyCode].usdRate;
-                        // Get max miner fees
-                        try {
-                            var maxEthereumMinerFeesBN = yield getMaxEthereumMinerFeesForSupplyBalancing(currencyCode, idealBalances);
-                        }
-                        catch (error) {
-                            return console.error("Failed to check max Ethereum miner fees before balancing supply:", error);
-                        }
-                        var maxEthereumMinerFees = parseInt(maxEthereumMinerFeesBN.toString()); // TODO: BN.prototype.toNumber replacement
-                        var maxMinerFeesUsd = maxEthereumMinerFees / Math.pow(10, 18) * db.currencies["ETH"].usdRate;
-                        // Check AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE
-                        if (expectedAdditionalYearlyInterestUsd * secondsSinceLastSupplyBalancing / maxMinerFeesUsd < parseFloat(process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE)) {
-                            db.isBalancingSupply = false;
-                            return console.log("Not balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", secondsSinceLastSupplyBalancing, "/", maxMinerFeesUsd, "is less than", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE);
-                        }
-                        console.log("Balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", secondsSinceLastSupplyBalancing, "/", maxMinerFeesUsd, "is at least", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE);
+                    // Get expected additional yearly interest
+                    var expectedAdditionalYearlyInterest = 0;
+                    for (var i = 0; i < idealBalances.length; i++) {
+                        var balanceDifference = parseInt(idealBalances[i].balanceDifferenceBN.toString()); // TODO: BN.prototype.toNumber replacement
+                        expectedAdditionalYearlyInterest += balanceDifference * idealBalances[i].supplyApr;
                     }
-                    else
-                        console.log("Balancing supply of", currencyCode, "because we have pending withdrawals");
+                    var expectedAdditionalYearlyInterestUsd = expectedAdditionalYearlyInterest / Math.pow(10, db.currencies[currencyCode].decimals) * db.currencies[currencyCode].usdRate;
+                    // Get max miner fees
+                    try {
+                        var maxEthereumMinerFeesBN = yield getMaxEthereumMinerFeesForSupplyBalancing(currencyCode, idealBalances);
+                    }
+                    catch (error) {
+                        return console.error("Failed to check max Ethereum miner fees before balancing supply:", error);
+                    }
+                    var maxEthereumMinerFees = parseInt(maxEthereumMinerFeesBN.toString()); // TODO: BN.prototype.toNumber replacement
+                    var maxMinerFeesUsd = maxEthereumMinerFees / Math.pow(10, 18) * db.currencies["ETH"].usdRate;
+                    // Check AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE
+                    if (expectedAdditionalYearlyInterestUsd * secondsSinceLastSupplyBalancing / maxMinerFeesUsd < parseFloat(process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE)) {
+                        db.isBalancingSupply = false;
+                        return console.log("Not balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", secondsSinceLastSupplyBalancing, "/", maxMinerFeesUsd, "is less than", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE);
+                    }
+                    console.log("Balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", secondsSinceLastSupplyBalancing, "/", maxMinerFeesUsd, "is at least", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE);
                     // Balance supply!
                     try {
                         yield doBalanceSupply(db, currencyCode, idealBalances, maxEthereumMinerFeesBN);
@@ -439,70 +692,8 @@ function tryBalanceSupply() {
                 }
                 else
                     console.log("Not balancing supply of", currencyCode, "because no change in balances");
-                // Process pending withdrawals if we have any
-                if (sumPendingWithdrawalsBN[currencyCode].gt(web3.utils.toBN(0)))
-                    yield processPendingWithdrawals(currencyCode);
             }
         db.isBalancingSupply = false;
-    });
-}
-function getSumPendingWithdrawals(currencyCode) {
-    return __awaiter(this, void 0, void 0, function* () {
-        // Get sum of pending withdrawals
-        if (process.env.NODE_ENV !== "production")
-            console.log("Checking for pending withdrawals for", currencyCode);
-        var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
-        var countPendingWithdrawals = yield fundManagerContract.methods.countPendingWithdrawals(currencyCode).call();
-        var sumPendingWithdrawalsBN = web3.utils.toBN(0);
-        if (countPendingWithdrawals > 0) {
-            for (var i = 0; i < countPendingWithdrawals; i++) {
-                var withdrawalAmount = yield fundManagerContract.methods.getPendingWithdrawalAmount(currencyCode, i).call();
-                sumPendingWithdrawalsBN.iadd(web3.utils.toBN(withdrawalAmount));
-                console.log("Leaving", withdrawalAmount, currencyCode, "in FundManager for withdrawal");
-            }
-            console.log("Leaving a total of", sumPendingWithdrawalsBN.toString(), currencyCode, "in FundManager for withdrawals");
-        }
-        return sumPendingWithdrawalsBN;
-    });
-}
-function processPendingWithdrawals(currencyCode) {
-    return __awaiter(this, void 0, void 0, function* () {
-        var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
-        // Create processPendingWithdrawals transaction
-        var data = fundManagerContract.methods.processPendingWithdrawals(currencyCode).encodeABI();
-        // Build transaction
-        var tx = {
-            from: process.env.ETHEREUM_ADMIN_ACCOUNT,
-            to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
-            value: 0,
-            data: data,
-            nonce: yield web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
-        };
-        if (process.env.NODE_ENV !== "production")
-            console.log("Processing pending withdrawals for", currencyCode, ":", tx);
-        // Estimate gas for transaction
-        try {
-            tx["gas"] = yield web3.eth.estimateGas(tx);
-        }
-        catch (error) {
-            throw "Failed to estimate gas before signing and sending transaction for processPendingWithdrawals for " + currencyCode + ": " + error;
-        }
-        // Sign transaction
-        try {
-            var signedTx = yield web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
-        }
-        catch (error) {
-            throw "Error signing transaction for processPendingWithdrawals for " + currencyCode + ": " + error;
-        }
-        // Send transaction
-        try {
-            var sentTx = yield web3.eth.sendSignedTransaction(signedTx.rawTransaction);
-        }
-        catch (error) {
-            throw "Error sending transaction for processPendingWithdrawals for " + currencyCode + ": " + error;
-        }
-        console.log("Successfully processed pending withdrawals for", currencyCode, ":", sentTx);
-        return sentTx;
     });
 }
 function getMaxEthereumMinerFeesForSupplyBalancing(currencyCode, poolBalances) {
@@ -516,17 +707,17 @@ function getMaxEthereumMinerFeesForSupplyBalancing(currencyCode, poolBalances) {
         var gasNecessary = 0;
         for (var i = 0; i < poolBalances.length; i++) {
             if (poolBalances[i].balanceDifferenceBN.gt(web3.utils.toBN(0))) {
-                if (poolBalances[i].pool === "dYdX")
+                if (poolBalances[i].poolName === "dYdX")
                     gasNecessary += 300000; // TODO: Correct dYdX gas prices
-                else if (poolBalances[i].pool === "Compound")
+                else if (poolBalances[i].poolName === "Compound")
                     gasNecessary += currencyCode === "DAI" ? 300000 : 150000;
                 else
                     gasNecessary += 300000; // TODO: Correct default gas price assumption
             }
             else if (poolBalances[i].balanceDifferenceBN.isNeg()) {
-                if (poolBalances[i].pool === "dYdX")
+                if (poolBalances[i].poolName === "dYdX")
                     gasNecessary += 300000; // TODO: Correct dYdX gas prices
-                else if (poolBalances[i].pool === "Compound")
+                else if (poolBalances[i].poolName === "Compound")
                     gasNecessary += 90000;
                 else
                     gasNecessary += 300000; // TODO: Correct default gas price assumption
@@ -562,13 +753,13 @@ function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerFeesBN 
             if (poolBalances[i].balanceDifferenceBN.isNeg()) {
                 // TODO: Don't execute a supply removal if not above a threshold
                 try {
-                    var txid = yield removeFunds(poolBalances[i].pool, currencyCode, poolBalances[i].balanceDifferenceBN.abs(), poolBalances[i].balanceBN.isZero());
+                    var txid = yield removeFunds(poolBalances[i].poolName, currencyCode, poolBalances[i].balanceDifferenceBN.abs(), poolBalances[i].balanceBN.isZero());
                 }
                 catch (error) {
-                    throw "Failed to remove funds from pool " + poolBalances[i].pool + " when balancing supply of " + currencyCode + ": " + error;
+                    throw "Failed to remove funds from pool " + poolBalances[i].poolName + " when balancing supply of " + currencyCode + ": " + error;
                 }
                 // Update pool's currency balance
-                db.pools[poolBalances[i].pool].currencies[currencyCode].poolBalanceBN = poolBalances[i].balanceBN.toString();
+                db.pools[poolBalances[i].poolName].currencies[currencyCode].poolBalanceBN = poolBalances[i].balanceBN.toString();
                 totalBalanceDifferenceBN.iadd(poolBalances[i].balanceDifferenceBN);
             }
         // Execute all supply additions
@@ -579,20 +770,20 @@ function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerFeesBN 
             if (poolBalances[i].balanceDifferenceBN.gt(web3.utils.toBN(0))) {
                 // TODO: Don't execute a supply addition if not above a threshold
                 try {
-                    var txid = yield addFunds(poolBalances[i].pool, currencyCode, poolBalances[i].balanceDifferenceBN);
+                    var txid = yield addFunds(poolBalances[i].poolName, currencyCode, poolBalances[i].balanceDifferenceBN);
                 }
                 catch (error) {
                     throw "Failed to add funds to pool when balancing supply of " + currencyCode + ": " + error;
                 }
                 // Update pool's currency balance
-                db.pools[poolBalances[i].pool].currencies[currencyCode].poolBalanceBN = poolBalances[i].balanceBN.toString();
+                db.pools[poolBalances[i].poolName].currencies[currencyCode].poolBalanceBN = poolBalances[i].balanceBN.toString();
                 totalBalanceDifferenceBN.iadd(poolBalances[i].balanceDifferenceBN);
             }
         // Update wallet balance in mock database
         db.currencies[currencyCode].fundManagerContractBalanceBN = db.currencies[currencyCode].fundManagerContractBalanceBN.sub(totalBalanceDifferenceBN);
     });
 }
-function approveFunds(poolName, currencyCode, amountBN) {
+function approveFundsToPool(poolName, currencyCode, amountBN) {
     return __awaiter(this, void 0, void 0, function* () {
         var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
         // Create depositToPool transaction
@@ -712,22 +903,11 @@ function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
         return sentTx;
     });
 }
-function exchangeFunds(inputCurrencyCode, outputCurrencyCode, maxInputAmountBN, minMarginalOutputAmountBN) {
+function approveFundsTo0x(currencyCode, amountBN) {
     return __awaiter(this, void 0, void 0, function* () {
-        // Get orders from 0x swap API
-        try {
-            var [orders, filledInputAmountBN] = yield zeroExExchange.getSwapOrders(db.currencies[inputCurrencyCode].tokenAddress, db.currencies[outputCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
-        }
-        catch (error) {
-            throw "Failed to get orders from 0x swap API for fill0xOrdersUpTo to exchange " + inputCurrencyCode + " to " + outputCurrencyCode + ": " + error;
-        }
-        var signatures = [];
-        for (var i = 0; i < orders.length; i++)
-            signatures.push(orders[i].signature);
-        // Instansiate FundManagerContract
         var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
-        // Create fill0xOrdersUpTo transaction
-        var data = fundManagerContract.methods.fill0xOrdersUpTo(orders, signatures, maxInputAmountBN, minMarginalOutputAmountBN).encodeABI();
+        // Create depositToPool transaction
+        var data = fundManagerContract.methods.approveTo0x(currencyCode, amountBN).encodeABI();
         // Build transaction
         var tx = {
             from: process.env.ETHEREUM_ADMIN_ACCOUNT,
@@ -737,27 +917,89 @@ function exchangeFunds(inputCurrencyCode, outputCurrencyCode, maxInputAmountBN, 
             nonce: yield web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
         };
         if (process.env.NODE_ENV !== "production")
-            console.log("Exchanging up to", maxInputAmountBN.toString(), inputCurrencyCode, "to", outputCurrencyCode, "at a minimum marginal output amount of", minMarginalOutputAmountBN.toString(), ":", tx);
+            console.log("Approving", amountBN.toString(), currencyCode, "funds to 0x:", tx);
         // Estimate gas for transaction
         try {
             tx["gas"] = yield web3.eth.estimateGas(tx);
         }
         catch (error) {
-            throw "Failed to estimate gas before signing and sending transaction for fill0xOrdersUpTo to exchange " + inputCurrencyCode + " to " + outputCurrencyCode + ": " + error;
+            throw "Failed to estimate gas before signing and sending transaction for approveTo0x of " + currencyCode + ": " + error;
         }
         // Sign transaction
         try {
             var signedTx = yield web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
         }
         catch (error) {
-            throw "Error signing transaction for fill0xOrdersUpTo to exchange " + inputCurrencyCode + " to " + outputCurrencyCode + ": " + error;
+            throw "Error signing transaction for approveTo0x of " + currencyCode + ": " + error;
         }
         // Send transaction
         try {
             var sentTx = yield web3.eth.sendSignedTransaction(signedTx.rawTransaction);
         }
         catch (error) {
-            throw "Error sending transaction for fill0xOrdersUpTo to exchange " + inputCurrencyCode + " to " + outputCurrencyCode + ": " + error;
+            throw "Error sending transaction for approveTo0x of " + currencyCode + ": " + error;
+        }
+        console.log("Successfully approved", currencyCode, "funds to 0x:", sentTx);
+        return sentTx;
+    });
+}
+function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFillAmountBN, orders, protocolFeeBN) {
+    return __awaiter(this, void 0, void 0, function* () {
+        // Build array of orders and signatures
+        var signatures = [];
+        for (var i = 0; i < orders.length; i++) {
+            signatures[i] = orders[i].signature;
+            orders[i] = {
+                makerAddress: orders[i].makerAddress,
+                takerAddress: orders[i].takerAddress,
+                feeRecipientAddress: orders[i].feeRecipientAddress,
+                senderAddress: orders[i].senderAddress,
+                makerAssetAmount: orders[i].makerAssetAmount,
+                takerAssetAmount: orders[i].takerAssetAmount,
+                makerFee: orders[i].makerFee,
+                takerFee: orders[i].takerFee,
+                expirationTimeSeconds: orders[i].expirationTimeSeconds,
+                salt: orders[i].salt,
+                makerAssetData: orders[i].makerAssetData,
+                takerAssetData: orders[i].takerAssetData,
+                makerFeeAssetData: orders[i].makerFeeAssetData,
+                takerFeeAssetData: orders[i].takerFeeAssetData
+            };
+        }
+        // Instansiate FundManagerContract
+        var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+        // Create marketSell0xOrdersFillOrKill transaction
+        var data = fundManagerContract.methods.marketSell0xOrdersFillOrKill(orders, signatures, takerAssetFillAmountBN).encodeABI();
+        // Build transaction
+        var tx = {
+            from: process.env.ETHEREUM_ADMIN_ACCOUNT,
+            to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
+            value: protocolFeeBN,
+            data: data,
+            nonce: yield web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
+        };
+        if (process.env.NODE_ENV !== "production")
+            console.log("Exchanging up to", takerAssetFillAmountBN.toString(), inputCurrencyCode, "to", outputCurrencyCode, ":", tx);
+        // Estimate gas for transaction
+        try {
+            tx["gas"] = yield web3.eth.estimateGas(tx);
+        }
+        catch (error) {
+            throw "Failed to estimate gas before signing and sending transaction for marketSell0xOrdersFillOrKill to exchange " + inputCurrencyCode + " to " + outputCurrencyCode + ": " + error;
+        }
+        // Sign transaction
+        try {
+            var signedTx = yield web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
+        }
+        catch (error) {
+            throw "Error signing transaction for marketSell0xOrdersFillOrKill to exchange " + inputCurrencyCode + " to " + outputCurrencyCode + ": " + error;
+        }
+        // Send transaction
+        try {
+            var sentTx = yield web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+        }
+        catch (error) {
+            throw "Error sending transaction for marketSell0xOrdersFillOrKill to exchange " + inputCurrencyCode + " to " + outputCurrencyCode + ": " + error;
         }
         console.log("Successfully exchanged", inputCurrencyCode, "to", outputCurrencyCode, ":", sentTx);
         return sentTx;
@@ -770,20 +1012,30 @@ function checkAllBalances() {
         yield checkPoolBalances();
     });
 }
+function checkCurrencyBalances(currencyCode) {
+    return __awaiter(this, void 0, void 0, function* () {
+        yield checkFundManagerContractBalance(currencyCode);
+        yield checkCurrencyPoolBalances(currencyCode);
+    });
+}
 function checkFundManagerContractBalances() {
     return __awaiter(this, void 0, void 0, function* () {
-        for (const currencyCode of Object.keys(db.currencies)) {
-            // Check wallet balance for this currency
-            try {
-                var balance = yield (currencyCode === "ETH" ? getFundManagerContractEthBalance() : getFundManagerContractErc20Balance(db.currencies[currencyCode].tokenAddress));
-            }
-            catch (error) {
-                console.error("Error getting", currencyCode, "wallet balance:", error);
-                return;
-            }
-            // Update mock database
-            db.currencies[currencyCode].fundManagerContractBalanceBN = web3.utils.toBN(balance);
+        for (const currencyCode of Object.keys(db.currencies))
+            yield checkFundManagerContractBalance(currencyCode);
+    });
+}
+function checkFundManagerContractBalance(currencyCode) {
+    return __awaiter(this, void 0, void 0, function* () {
+        // Check wallet balance for this currency
+        try {
+            var balance = yield (currencyCode === "ETH" ? getFundManagerContractEthBalance() : getFundManagerContractErc20Balance(db.currencies[currencyCode].tokenAddress));
         }
+        catch (error) {
+            console.error("Error getting", currencyCode, "wallet balance:", error);
+            return;
+        }
+        // Update mock database
+        db.currencies[currencyCode].fundManagerContractBalanceBN = web3.utils.toBN(balance);
     });
 }
 function getFundManagerContractEthBalance() {
@@ -829,6 +1081,38 @@ function checkPoolBalances() {
             }
             for (const currencyCode of Object.keys(balances))
                 db.pools[poolName].currencies[currencyCode].poolBalanceBN = balances[currencyCode];
+        }
+    });
+}
+function checkCurrencyPoolBalances(currencyCode) {
+    return __awaiter(this, void 0, void 0, function* () {
+        // Get balances for all pools
+        for (const poolName of Object.keys(db.pools)) {
+            try {
+                if (poolName === "dYdX") {
+                    // Might as well get all dYdX balances since it doesn't cost us anything
+                    // Yes, I know I am overwriting currencyCode; doesn't matter
+                    var currencyCodesByTokenAddress = {};
+                    for (const currencyCode of Object.keys(db.pools[poolName].currencies))
+                        currencyCodesByTokenAddress[db.currencies[currencyCode].tokenAddress] = currencyCode;
+                    var balances = yield dydxProtocol.getUnderlyingBalances(currencyCodesByTokenAddress);
+                    for (const currencyCode of Object.keys(balances))
+                        db.pools[poolName].currencies[currencyCode].poolBalanceBN = balances[currencyCode];
+                }
+                else if (poolName == "Compound") {
+                    try {
+                        db.pools[poolName].currencies[currencyCode].poolBalanceBN = yield compoundProtocol.getUnderlyingBalance(currencyCode);
+                    }
+                    catch (error) {
+                        return console.error("Failed to get", currencyCode, "balance on Compound:", error);
+                    }
+                }
+                else
+                    return console.error("Failed to get balances for unrecognized pool:", poolName);
+            }
+            catch (error) {
+                console.error("Failed to get balance of", currencyCode, "for", poolName, "pool:", error);
+            }
         }
     });
 }
