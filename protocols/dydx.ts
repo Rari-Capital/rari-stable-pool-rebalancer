@@ -42,19 +42,21 @@ export default class DydxProtocol {
             throw "Error when calling SoloMargin.getMarketCurrentIndex for " + currencyCode + ": " + error;
         }
                 
+        var borrowWeiBN = this.parToWei(borrowParBN, borrowIndexBN);
+        var supplyWeiBN = this.parToWei(supplyParBN, supplyIndexBN);
+        var newSupplyWeiBN = supplyWeiBN.add(supplyWeiDifferenceBN);
         var polynomialInterestSetterContract = new this.web3.eth.Contract(polynomialInterestSetterAbi, "0xaEE83ca85Ad63DFA04993adcd76CB2B3589eCa49");
-        var secondsPerYearBN = this.web3.utils.toBN(60 * 60 * 24 * 365);
         
         try {
-            var borrowBN = (await polynomialInterestSetterContract.methods.getInterestRate(tokenAddress, this.parToWei(borrowParBN, borrowIndexBN), this.parToWei(supplyParBN, supplyIndexBN).add(supplyWeiDifferenceBN)).call()).mul(secondsPerYearBN);
+            var borrowInterestRatePerSecondBN = this.web3.utils.toBN((await polynomialInterestSetterContract.methods.getInterestRate(tokenAddress, borrowWeiBN, newSupplyWeiBN).call())[0]);
         } catch (error) {
             throw "Error when calling PolynomialInterestSetter.getInterestRate for " + currencyCode + ": " + error;
         }
         
-        var usageBN = borrowParBN.div(supplyParBN.add(this.weiToPar(supplyWeiDifferenceBN, supplyIndexBN)));
+        var secondsPerYearBN = this.web3.utils.toBN(60 * 60 * 24 * 365);
+        var borrowInterestRatePerYearBN = borrowInterestRatePerSecondBN.mul(secondsPerYearBN);
         var earningsRateBN = this.web3.utils.toBN("950000000000000000");
-        var apr = borrowBN.mul(usageBN).mul(earningsRateBN);
-        return apr;
+        return parseFloat(borrowInterestRatePerYearBN.mul(earningsRateBN).mul(borrowWeiBN).div(supplyWeiBN).divn(1e18).toString()) / 1e18; // borrowWeiBN.div(supplyWeiBN) = utilization/usage
     }    
 
     async getApr(currencyCode) {
@@ -62,7 +64,7 @@ export default class DydxProtocol {
         if (marketId === undefined) throw "Currency code not supported by dYdX implementation";
 
         try {
-            var borrowInterestRateBN = this.web3.utils.toBN((await this.soloMarginContract.methods.getMarketInterestRate(marketId).call())[0]);
+            var borrowInterestRatePerSecondBN = this.web3.utils.toBN((await this.soloMarginContract.methods.getMarketInterestRate(marketId).call())[0]);
         } catch (error) {
             throw "Error when calling SoloMargin.getMarketInterestRate for " + currencyCode + ": " + error;
         }
@@ -74,10 +76,21 @@ export default class DydxProtocol {
         } catch (error) {
             throw "Error when calling SoloMargin.getMarketTotalPar for " + currencyCode + ": " + error;
         }
+        
+        try {
+            var res = await this.soloMarginContract.methods.getMarketCurrentIndex(marketId).call();
+            var borrowIndexBN = this.web3.utils.toBN(res[0]);
+            var supplyIndexBN = this.web3.utils.toBN(res[1]);
+        } catch (error) {
+            throw "Error when calling SoloMargin.getMarketCurrentIndex for " + currencyCode + ": " + error;
+        }
 
-        var utilizationBN = borrowParBN.div(supplyParBN);
+        var secondsPerYearBN = this.web3.utils.toBN(60 * 60 * 24 * 365);
+        var borrowInterestRatePerYearBN = borrowInterestRatePerSecondBN.mul(secondsPerYearBN);
+        var borrowWeiBN = this.parToWei(borrowParBN, borrowIndexBN);
+        var supplyWeiBN = this.parToWei(supplyParBN, supplyIndexBN);
         var earningsRateBN = this.web3.utils.toBN("950000000000000000");
-        return borrowInterestRateBN.mul(earningsRateBN).mul(utilizationBN);
+        return parseFloat(borrowInterestRatePerYearBN.mul(earningsRateBN).mul(borrowWeiBN).div(supplyWeiBN).divn(1e18).toString()) / 1e18; // borrowWeiBN.div(supplyWeiBN) = utilization/usage
     }
 
     async getAprs(currencyCodes) {

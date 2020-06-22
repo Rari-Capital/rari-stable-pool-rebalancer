@@ -480,13 +480,22 @@ function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN = web
         for (const poolName of Object.keys(db.pools))
             if (db.pools[poolName].currencies[currencyCode])
                 pools.push({ poolName, supplyApr: db.pools[poolName].currencies[currencyCode].supplyApr });
-        if (pools.length <= 1)
-            return pools;
         pools.sort((a, b) => (a.supplyApr < b.supplyApr) ? 1 : -1);
         // Calculate balance differences and balances
         for (var i = 0; i < pools.length; i++) {
             var minApr = pools[i + 1] ? pools[i + 1].supplyApr : 0;
             var maxBalanceDifferenceBN = totalBN.sub(db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN);
+            if (minApr == 0) {
+                // Set balance difference to maximum since there are no other non-zero APRs
+                pools[i].balanceDifferenceBN = maxBalanceDifferenceBN;
+                pools[i].balanceBN = db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN.add(pools[i].balanceDifferenceBN);
+                // Set other pools' balances to 0 and break
+                for (var j = i + 1; j < pools.length; j++) {
+                    pools[j].balanceBN = web3.utils.toBN(0);
+                    pools[j].balanceDifferenceBN = web3.utils.toBN(0).sub(db.pools[pools[j].poolName].currencies[currencyCode].poolBalanceBN);
+                }
+                break;
+            }
             // Predict APR at maxBalanceDifferenceBN
             try {
                 var predictedApr = yield predictApr(currencyCode, pools[i].poolName, maxBalanceDifferenceBN);
@@ -498,12 +507,12 @@ function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN = web
                 // Set balance difference to maximum since predicted APR is not below the minimum
                 pools[i].balanceDifferenceBN = maxBalanceDifferenceBN;
                 pools[i].balanceBN = db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN.add(pools[i].balanceDifferenceBN);
-                // Set other pools' balances to 0 and return
+                // Set other pools' balances to 0 and break
                 for (var j = i + 1; j < pools.length; j++) {
                     pools[j].balanceBN = web3.utils.toBN(0);
                     pools[j].balanceDifferenceBN = web3.utils.toBN(0).sub(db.pools[pools[j].poolName].currencies[currencyCode].poolBalanceBN);
                 }
-                return pools;
+                break;
             }
             else {
                 // Predict balance difference necessary to equalize APR with the next highest
@@ -518,7 +527,7 @@ function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN = web
             }
         }
         if (process.env.NODE_ENV !== "production")
-            console.log("Ideal balances of", currencyCode, ":", pools);
+            console.log("Ideal balances of", currencyCode, ":", JSON.stringify(pools, null, 2));
         return pools;
     });
 }
@@ -796,7 +805,7 @@ function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerFeesBN 
                     throw "Failed to remove funds from pool " + poolBalances[i].poolName + " when balancing supply of " + currencyCode + ": " + error;
                 }
                 // Update pool's currency balance
-                db.pools[poolBalances[i].poolName].currencies[currencyCode].poolBalanceBN = poolBalances[i].balanceBN.toString();
+                db.pools[poolBalances[i].poolName].currencies[currencyCode].poolBalanceBN = poolBalances[i].balanceBN;
                 totalBalanceDifferenceBN.iadd(poolBalances[i].balanceDifferenceBN);
             }
         // Execute all supply additions
@@ -813,7 +822,7 @@ function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerFeesBN 
                     throw "Failed to add funds to pool when balancing supply of " + currencyCode + ": " + error;
                 }
                 // Update pool's currency balance
-                db.pools[poolBalances[i].poolName].currencies[currencyCode].poolBalanceBN = poolBalances[i].balanceBN.toString();
+                db.pools[poolBalances[i].poolName].currencies[currencyCode].poolBalanceBN = poolBalances[i].balanceBN;
                 totalBalanceDifferenceBN.iadd(poolBalances[i].balanceDifferenceBN);
             }
         // Update wallet balance in mock database
