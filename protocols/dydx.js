@@ -8,21 +8,18 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-// TODO: Fix error associated with import statement
-// import { Solo, Networks, MarketId, BigNumber } from '@dydxprotocol/solo';
-var _solo = require('@dydxprotocol/solo');
-var Solo = _solo.Solo, Networks = _solo.Networks, MarketId = _solo.MarketId, BigNumber = _solo.BigNumber;
-const soloMarginAbi = require('./dydx/SoloMargin.json');
-const polynomialInterestSetterAbi = require('./dydx/PolynomialInterestSetter.json');
+const fs_1 = __importDefault(require("fs"));
+const soloMarginAbi = JSON.parse(fs_1.default.readFileSync(__dirname + '/dydx/SoloMargin.json', 'utf8'));
+const polynomialInterestSetterAbi = JSON.parse(fs_1.default.readFileSync(__dirname + '/dydx/PolynomialInterestSetter.json', 'utf8'));
 class DydxProtocol {
     constructor(web3) {
         this.marketIds = { "WETH": 0, "SAI": 1, "USDC": 2, "DAI": 3 };
         this.web3 = web3;
-        // Initialize dYdX
-        this.solo = new Solo(process.env.INFURA_ENDPOINT_URL, Networks.MAINNET, {
-            defaultAccount: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
-        });
+        this.soloMarginContract = new this.web3.eth.Contract(soloMarginAbi, "0x1e0447b19bb6ecfdae1e4ae1694b0c3659614e4e");
     }
     parToWei(parBN, indexBN) {
         return parBN.mul(indexBN);
@@ -35,21 +32,24 @@ class DydxProtocol {
             var marketId = this.marketIds[currencyCode];
             if (marketId === undefined)
                 throw "Currency code not supported by dYdX implementation";
-            var soloMarginContract = new this.web3.eth.Contract(soloMarginAbi, "0x1e0447b19bb6ecfdae1e4ae1694b0c3659614e4e");
             try {
-                var [borrowParBN, supplyParBN] = yield soloMarginContract.methods.getMarketTotalPar(marketId).call();
+                var res = yield this.soloMarginContract.methods.getMarketTotalPar(marketId).call();
+                var borrowParBN = this.web3.utils.toBN(res[0]);
+                var supplyParBN = this.web3.utils.toBN(res[1]);
             }
             catch (error) {
                 throw "Error when calling SoloMargin.getMarketTotalPar for " + currencyCode + ": " + error;
             }
             try {
-                var [borrowIndexBN, supplyIndexBN] = yield soloMarginContract.methods.getMarketCurrentIndex(marketId).call();
+                var res = yield this.soloMarginContract.methods.getMarketCurrentIndex(marketId).call();
+                var borrowIndexBN = this.web3.utils.toBN(res[0]);
+                var supplyIndexBN = this.web3.utils.toBN(res[1]);
             }
             catch (error) {
                 throw "Error when calling SoloMargin.getMarketCurrentIndex for " + currencyCode + ": " + error;
             }
-            var secondsPerYearBN = this.web3.utils.toBN(60 * 60 * 24 * 365);
             var polynomialInterestSetterContract = new this.web3.eth.Contract(polynomialInterestSetterAbi, "0xaEE83ca85Ad63DFA04993adcd76CB2B3589eCa49");
+            var secondsPerYearBN = this.web3.utils.toBN(60 * 60 * 24 * 365);
             try {
                 var borrowBN = (yield polynomialInterestSetterContract.methods.getInterestRate(tokenAddress, this.parToWei(borrowParBN, borrowIndexBN), this.parToWei(supplyParBN, supplyIndexBN).add(supplyWeiDifferenceBN)).call()).mul(secondsPerYearBN);
             }
@@ -57,52 +57,71 @@ class DydxProtocol {
                 throw "Error when calling PolynomialInterestSetter.getInterestRate for " + currencyCode + ": " + error;
             }
             var usageBN = borrowParBN.div(supplyParBN.add(this.weiToPar(supplyWeiDifferenceBN, supplyIndexBN)));
-            var earningsRateBN = this.web3.utils.toBN(950000000000000000);
+            var earningsRateBN = this.web3.utils.toBN("950000000000000000");
             var apr = borrowBN.mul(usageBN).mul(earningsRateBN);
             return apr;
         });
     }
     getApr(currencyCode) {
         return __awaiter(this, void 0, void 0, function* () {
-            // TODO: May have to use getMarketSupplyInterestRate from https://github.com/dydxprotocol/solo/blob/master/src/modules/Getters.ts
-            // TODO: Why use totalSupplyAPR over totalSupplyAPY? Simply because totalSupplyAPR is the one used by https://trade.dydx.exchange/balances
-            const { markets } = yield this.solo.api.getMarkets();
-            for (var i = 0; i < markets.length; i++)
-                if (currencyCode === markets[i].symbol)
-                    return parseFloat(markets[i].totalSupplyAPR);
-            throw "Unknown dYdX market";
+            var marketId = this.marketIds[currencyCode];
+            if (marketId === undefined)
+                throw "Currency code not supported by dYdX implementation";
+            try {
+                var borrowInterestRateBN = this.web3.utils.toBN((yield this.soloMarginContract.methods.getMarketInterestRate(marketId).call())[0]);
+            }
+            catch (error) {
+                throw "Error when calling SoloMargin.getMarketInterestRate for " + currencyCode + ": " + error;
+            }
+            try {
+                var res = yield this.soloMarginContract.methods.getMarketTotalPar(marketId).call();
+                var borrowParBN = this.web3.utils.toBN(res[0]);
+                var supplyParBN = this.web3.utils.toBN(res[1]);
+            }
+            catch (error) {
+                throw "Error when calling SoloMargin.getMarketTotalPar for " + currencyCode + ": " + error;
+            }
+            var utilizationBN = borrowParBN.div(supplyParBN);
+            var earningsRateBN = this.web3.utils.toBN("950000000000000000");
+            return borrowInterestRateBN.mul(earningsRateBN).mul(utilizationBN);
         });
     }
     getAprs(currencyCodes) {
         return __awaiter(this, void 0, void 0, function* () {
             var aprs = {};
-            // TODO: May have to use getMarketSupplyInterestRate from https://github.com/dydxprotocol/solo/blob/master/src/modules/Getters.ts
-            // TODO: Why use totalSupplyAPR over totalSupplyAPY? Simply because totalSupplyAPR is the one used by https://trade.dydx.exchange/balances
-            const { markets } = yield this.solo.api.getMarkets();
-            for (var i = 0; i < markets.length; i++) {
-                if (currencyCodes.indexOf(markets[i].symbol) >= 0)
-                    aprs[markets[i].symbol] = parseFloat(markets[i].totalSupplyAPR);
-            }
+            for (var i = 0; i < currencyCodes.length; i++)
+                aprs[currencyCodes[i]] = yield this.getApr(currencyCodes[i]);
             return aprs;
         });
     }
     getUnderlyingBalances(currencyCodesByTokenAddress) {
         return __awaiter(this, void 0, void 0, function* () {
-            // Get balances from dYdX
-            const balances = yield this.solo.getters.getAccountBalances(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS, // Account Owner
-            new BigNumber(0));
+            try {
+                var [tokens, pars, weis] = Object.values(yield this.soloMarginContract.methods.getAccountBalances({
+                    owner: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
+                    number: this.web3.utils.toBN(0)
+                }).call());
+            }
+            catch (error) {
+                throw "Error when calling SoloMargin.getAccountBalances: " + error;
+            }
             var balancesByCurrencyCode = {};
-            for (var i = 0; i < balances.length; i++) {
-                var currencyCode = currencyCodesByTokenAddress[balances[i].tokenAddress];
+            for (var i = 0; i < tokens.length; i++) {
+                var currencyCode = currencyCodesByTokenAddress[tokens[i]];
                 if (!currencyCode)
                     continue;
-                var balanceBN = this.web3.utils.toBN(balances[i].wei);
-                if (process.env.NODE_ENV !== "production")
-                    console.log("DydxProtocol.getUnderlyingBalances got", balanceBN.toString(), currencyCode);
-                balancesByCurrencyCode[currencyCode] = balanceBN;
+                balancesByCurrencyCode[currencyCode] = this.valueToBN(weis[i]);
             }
+            if (process.env.NODE_ENV !== "production")
+                console.log("DydxProtocol.getUnderlyingBalances got", balancesByCurrencyCode);
             return balancesByCurrencyCode;
         });
+    }
+    valueToBN({ value, sign }) {
+        let result = this.web3.utils.toBN(value);
+        if (!result.isZero() && !sign)
+            result.imul(this.web3.utils.toBN(-1));
+        return result;
     }
 }
 exports.default = DydxProtocol;

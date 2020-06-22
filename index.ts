@@ -1,26 +1,33 @@
+import fs from 'fs';
 import Web3 from 'web3';
-const https = require('https');
+import https from 'https';
 
 import DydxProtocol from './protocols/dydx';
 import CompoundProtocol from './protocols/compound';
 import ZeroExExchange from './exchanges/0x';
 
-const erc20Abi = require('./abi/ERC20.json');
-const rariFundManagerAbi = require('./abi/RariFundManager.json');
+const erc20Abi = JSON.parse(fs.readFileSync(__dirname + '/abi/ERC20.json', 'utf8'));
+const rariFundManagerAbi = JSON.parse(fs.readFileSync(__dirname + '/abi/RariFundManager.json', 'utf8'));
 
 // Init Web3
-var web3 = new Web3(new Web3.providers.HttpProvider(process.env.INFURA_ENDPOINT_URL));
+var web3 = new Web3(new Web3.providers.HttpProvider(process.env.WEB3_HTTP_PROVIDER_URL));
 
-// Init DydxProtocol, CompoundProtocol, and ZeroExExchange
+// Init RariFundManager contract
+// TODO: Remove @ts-ignore below
+// @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
+var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+
+// Init protocols
 var dydxProtocol = new DydxProtocol(web3);
 var compoundProtocol = new CompoundProtocol(web3);
+
+// Init 0x exchange
 var zeroExExchange = new ZeroExExchange(web3);
 
 // Mock currency and pool database
 var db = {
     currencies: {
         "ETH": {
-            fundManagerContractBalanceBN: web3.utils.toBN(0),
             decimals: 18,
             usdRate: 0
         },
@@ -74,11 +81,17 @@ var db = {
         }
     },
     isBalancingSupply: false,
-    lastTimeBalanced: 0
+    lastTimeBalanced: 0,
+    ownerWithdrawableCurrencies: {
+        "ETH": {},
+        "COMP": {
+            tokenAddress: "0xc00e94Cb662C3520282E6f5717214004A7f26888"
+        }
+    }
 };
 
 async function doCycle() {
-    await checkAllBalances();
+    await checkAllTokenBalances();
     await getAllAprs();
     await setAcceptedCurrencies();
     if (parseInt(process.env.AUTOMATIC_SUPPLY_BALANCING_ENABLED)) await tryBalanceSupply();
@@ -91,12 +104,12 @@ async function onLoad() {
     setInterval(function() { updateCurrencyUsdRates(); }, (process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS ? parseFloat(process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS) : 60) * 1000);
 
     // Start claiming interest fees regularly
-    await depositInterestFees();
-    setInterval(function() { depositInterestFees(); }, (process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS ? parseFloat(process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS) : 86400) * 1000);
+    await tryDepositInterestFees();
+    setInterval(function() { tryDepositInterestFees(); }, (process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS ? parseFloat(process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS) : 86400) * 1000);
 
     // Start withdrawing ETH and COMP regularly
-    await ownerWithdrawAllCurrencies();
-    setInterval(function() { ownerWithdrawAllCurrencies(); }, (process.env.OWNER_WITHDRAW_INTERVAL_SECONDS ? parseFloat(process.env.OWNER_WITHDRAW_INTERVAL_SECONDS) : 86400) * 1000);
+    await tryOwnerWithdrawAllCurrencies();
+    setInterval(function() { tryOwnerWithdrawAllCurrencies(); }, (process.env.OWNER_WITHDRAW_INTERVAL_SECONDS ? parseFloat(process.env.OWNER_WITHDRAW_INTERVAL_SECONDS) : 86400) * 1000);
 
     // Set max token allowances to pools and 0x
     await setMaxTokenAllowances();
@@ -109,9 +122,16 @@ onLoad();
 
 /* CLAIMING INTEREST FEES */
 
-async function depositInterestFees() {
-    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+async function tryDepositInterestFees() {
+    // Check unclaimed fees
+    var unclaimedFees = await fundManagerContract.methods.getInterestFeesUnclaimed().call();
+    if (web3.utils.toBN(unclaimedFees).isZero()) return null;
 
+    // Deposit fees
+    return await depositInterestFees();
+}
+
+async function depositInterestFees() {
     // Create depositFees transaction
     var data = fundManagerContract.methods.depositFees().encodeABI();
 
@@ -153,15 +173,22 @@ async function depositInterestFees() {
 
 /* OWNER WITHDRAWALS */
 
-async function ownerWithdrawAllCurrencies() {
-    // TODO: Put currencies withdrawable by the owner in an array
-    await ownerWithdrawCurrency("ETH");
-    await ownerWithdrawCurrency("COMP");
+async function tryOwnerWithdrawAllCurrencies() {
+    for (const currencyCode of Object.keys(db.ownerWithdrawableCurrencies)) await tryOwnerWithdrawCurrency(currencyCode);
+}
+
+async function tryOwnerWithdrawCurrency(currencyCode) {
+    try {
+        var balance = await (currencyCode == "ETH" ? web3.eth.getBalance(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS) : (new web3.eth.Contract(erc20Abi, db.ownerWithdrawableCurrencies[currencyCode].tokenAddress)).methods.balanceOf(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS).call());
+    } catch (error) {
+        throw "Error when retreiving " + currencyCode + " balance of admin account before trying to withdraw owner currencies: " + error;
+    }
+
+    if (web3.utils.toBN(balance).isZero()) return null;
+    return await ownerWithdrawCurrency(currencyCode);
 }
 
 async function ownerWithdrawCurrency(currencyCode) {
-    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
-
     // Create depositFees transaction
     var data = fundManagerContract.methods.ownerWithdraw(currencyCode).encodeABI();
 
@@ -211,10 +238,8 @@ async function setAcceptedCurrencies() {
         return console.error("Failed to get best currency and pool when trying to set accepted currencies:", error);
     }
     
-    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
-
     for (const currencyCode of Object.keys(db.currencies)) if (currencyCode !== "ETH") {
-        var accepted = await fundManagerContract.methods.isAcceptedCurrency(currencyCode).call();
+        var accepted = await fundManagerContract.methods.isCurrencyAccepted(currencyCode).call();
 
         try {
             if (!accepted && currencyCode === bestCurrencyCode) await setAcceptedCurrency(currencyCode, true);
@@ -226,8 +251,6 @@ async function setAcceptedCurrencies() {
 }
 
 async function setAcceptedCurrency(currencyCode, accepted) {
-    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
-
     // Create processPendingWithdrawals transaction
     var data = fundManagerContract.methods.setAcceptedCurrency(currencyCode, accepted).encodeABI();
 
@@ -294,7 +317,9 @@ async function setMaxTokenAllowances(unset = false) {
         for (const currencyCode of Object.keys(db.pools[poolName].currencies))
             setMaxTokenAllowanceToPool(poolName, currencyCode, unset);
 
-    for (const currencyCode of Object.keys(db.currencies)) setMaxTokenAllowanceTo0x(currencyCode, unset);
+    for (const currencyCode of Object.keys(db.currencies))
+        if (currencyCode != "ETH")
+            setMaxTokenAllowanceTo0x(currencyCode, unset);
 }
 
 async function setMaxTokenAllowanceToPool(poolName, currencyCode, unset = false) {
@@ -303,7 +328,8 @@ async function setMaxTokenAllowanceToPool(poolName, currencyCode, unset = false)
     try {
         var txid = await approveFundsToPool(poolName, currencyCode, unset ? web3.utils.toBN(0) : web3.utils.toBN(2).pow(web3.utils.toBN(256)).sub(web3.utils.toBN(1)));
     } catch (error) {
-        console.log("Failed to set " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on", poolName);
+        console.error("Failed to set " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on", poolName, ":", error);
+        return;
     }
     
     console.log((unset ? "Zero" : "Max") + " token allowance set successfully for", currencyCode, "on", poolName, ":", txid);
@@ -315,7 +341,8 @@ async function setMaxTokenAllowanceTo0x(currencyCode, unset = false) {
     try {
         var txid = await approveFundsTo0x(currencyCode, unset ? web3.utils.toBN(0) : web3.utils.toBN(2).pow(web3.utils.toBN(256)).sub(web3.utils.toBN(1)));
     } catch (error) {
-        console.log("Failed to set " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on 0x");
+        console.error("Failed to set " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on 0x:", error);
+        return;
     }
     
     console.log((unset ? "Zero" : "Max") + " token allowance set successfully for", currencyCode, "on 0x:", txid);
@@ -368,7 +395,7 @@ async function predictBalanceDifferenceBN(currencyCode, poolName, targetApr, apr
 
     for (var i = 0; i < 10; i++) {
         if (Math.abs(targetApr - aprAtEstimatedBalanceDifference) <= targetApr / 100) break;
-        estimatedBalanceDifferenceBN = estimatedBalanceDifferenceBN.div(currentApr - aprAtEstimatedBalanceDifference).mul(currentApr - targetApr);
+        estimatedBalanceDifferenceBN = estimatedBalanceDifferenceBN.muln((currentApr - targetApr) / (currentApr - aprAtEstimatedBalanceDifference) * 1e18).divn(1e18);
         aprAtEstimatedBalanceDifference = await predictApr(currencyCode, poolName, estimatedBalanceDifferenceBN);
     }
 
@@ -456,8 +483,8 @@ async function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN
         // Predict APR at maxBalanceDifferenceBN
         try {
             var predictedApr = await predictApr(currencyCode, pools[i].poolName, maxBalanceDifferenceBN);
-        } catch {
-            throw "Failed to predict APR";
+        } catch (error) {
+            throw "Failed to predict APR: " + error;
         }
 
         if (predictedApr >= minApr) {
@@ -476,8 +503,8 @@ async function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN
             // Predict balance difference necessary to equalize APR with the next highest
             try {
                 pools[i].balanceDifferenceBN = await predictBalanceDifferenceBN(currencyCode, pools[i].poolName, minApr, predictedApr, maxBalanceDifferenceBN);
-            } catch {
-                throw "Failed to predict balance difference";
+            } catch (error) {
+                throw "Failed to predict balance difference: " + error;
             }
 
             pools[i].balanceBN = db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN.add(pools[i].balanceDifferenceBN);
@@ -485,6 +512,7 @@ async function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN
         }
     }
 
+    if (process.env.NODE_ENV !== "production") console.log("Ideal balances of", currencyCode, ":", pools);
     return pools;
 }
 
@@ -651,8 +679,8 @@ async function tryBalanceSupply() {
                 }
             }
 
-            await checkCurrencyBalances(currencyCode);
-            await checkCurrencyBalances(bestCurrencyCode);
+            await checkTokenBalances(currencyCode);
+            await checkTokenBalances(bestCurrencyCode);
         }
     }
 
@@ -743,7 +771,7 @@ async function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerF
 
     // Check that we have enough balance for gas fees
     try {
-        var ethereumBalance = await getFundManagerContractEthBalance();
+        var ethereumBalance = await web3.eth.getBalance(process.env.ETHEREUM_ADMIN_ACCOUNT);
     } catch (error) {
         throw "Failed to check ETH wallet balance to make sure we have enough funds for fees before balancing supply: " + error;
     }
@@ -799,8 +827,6 @@ async function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerF
 }
 
 async function approveFundsToPool(poolName, currencyCode, amountBN) {
-    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
-
     // Create depositToPool transaction
     var data = fundManagerContract.methods.approveToPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
 
@@ -841,8 +867,6 @@ async function approveFundsToPool(poolName, currencyCode, amountBN) {
 }
 
 async function addFunds(poolName, currencyCode, amountBN) {
-    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
-
     // Create depositToPool transaction
     var data = fundManagerContract.methods.depositToPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
 
@@ -883,8 +907,6 @@ async function addFunds(poolName, currencyCode, amountBN) {
 }
 
 async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
-    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
-
     // Create withdrawFromPool transaction
     var data = fundManagerContract.methods.withdrawFromPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
 
@@ -925,8 +947,6 @@ async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) 
 }
 
 async function approveFundsTo0x(currencyCode, amountBN) {
-    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
-
     // Create depositToPool transaction
     var data = fundManagerContract.methods.approveTo0x(currencyCode, amountBN).encodeABI();
 
@@ -990,10 +1010,7 @@ async function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFi
             takerFeeAssetData: orders[i].takerFeeAssetData
         };
     }
-
-    // Instansiate FundManagerContract
-    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
-
+    
     // Create marketSell0xOrdersFillOrKill transaction
     var data = fundManagerContract.methods.marketSell0xOrdersFillOrKill(orders, signatures, takerAssetFillAmountBN).encodeABI();
 
@@ -1035,25 +1052,26 @@ async function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFi
 
 /* WALLET BALANCE CHECKING */
 
-async function checkAllBalances() {
-    await checkFundManagerContractBalances();
+async function checkAllTokenBalances() {
+    await checkFundManagerContractTokenBalances();
     await checkPoolBalances();
 }
 
-async function checkCurrencyBalances(currencyCode) {
-    await checkFundManagerContractBalance(currencyCode);
-    await checkCurrencyPoolBalances(currencyCode);
+async function checkTokenBalances(currencyCode) {
+    await checkFundManagerContractTokenBalance(currencyCode);
+    await checkTokenPoolBalances(currencyCode);
 }
 
-async function checkFundManagerContractBalances() {
+async function checkFundManagerContractTokenBalances() {
     for (const currencyCode of Object.keys(db.currencies))
-        await checkFundManagerContractBalance(currencyCode);
+        if (currencyCode !== "ETH")
+            await checkFundManagerContractTokenBalance(currencyCode);
 }
 
-async function checkFundManagerContractBalance(currencyCode) {
+async function checkFundManagerContractTokenBalance(currencyCode) {
     // Check wallet balance for this currency
     try {
-        var balance = await (currencyCode === "ETH" ? getFundManagerContractEthBalance() : getFundManagerContractErc20Balance(db.currencies[currencyCode].tokenAddress));
+        var balance = await getFundManagerContractErc20Balance(db.currencies[currencyCode].tokenAddress);
     } catch (error) {
         console.error("Error getting", currencyCode, "wallet balance:", error);
         return;
@@ -1063,15 +1081,9 @@ async function checkFundManagerContractBalance(currencyCode) {
     db.currencies[currencyCode].fundManagerContractBalanceBN = web3.utils.toBN(balance);
 }
 
-async function getFundManagerContractEthBalance() {
-    try {
-        return await web3.eth.getBalance(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
-    } catch (error) {
-        throw "Error when retreiving ETH balance of FundManager: " + error;
-    }
-}
-
 async function getFundManagerContractErc20Balance(erc20ContractAddress) {
+    // TODO: Remove @ts-ignore below
+    // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
     var erc20Contract = new web3.eth.Contract(erc20Abi, erc20ContractAddress);
 
     try {
@@ -1100,7 +1112,7 @@ async function checkPoolBalances() {
     }
 }
 
-async function checkCurrencyPoolBalances(currencyCode) {
+async function checkTokenPoolBalances(currencyCode) {
     // Get balances for all pools
     for (const poolName of Object.keys(db.pools)) {
         try {

@@ -1,13 +1,16 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-const https = require('https');
+const https_1 = __importDefault(require("https"));
 class ZeroExExchange {
     constructor(web3) {
         this.web3 = web3;
     }
     getPrice(inputTokenSymbol, outputTokenSymbol) {
         return new Promise((resolve, reject) => {
-            https.get('https://api.0x.org/swap/v0/prices?sellToken=' + inputTokenSymbol, (resp) => {
+            https_1.default.get('https://api.0x.org/swap/v0/prices?sellToken=' + inputTokenSymbol, (resp) => {
                 let data = '';
                 // A chunk of data has been recieved
                 resp.on('data', (chunk) => {
@@ -32,7 +35,7 @@ class ZeroExExchange {
     }
     getSwapOrders(inputTokenAddress, inputTokenDecimals, outputTokenAddress, maxInputAmountBN, minMarginalOutputAmountBN) {
         return new Promise((resolve, reject) => {
-            https.get('https://api.0x.org/swap/v0/quote?sellToken=' + inputTokenAddress + '&buyToken=' + outputTokenAddress + '&sellAmount=' + maxInputAmountBN.toString(), (resp) => {
+            https_1.default.get('https://api.0x.org/swap/v0/quote?sellToken=' + inputTokenAddress + '&buyToken=' + outputTokenAddress + '&sellAmount=' + maxInputAmountBN.toString(), (resp) => {
                 let data = '';
                 // A chunk of data has been recieved
                 resp.on('data', (chunk) => {

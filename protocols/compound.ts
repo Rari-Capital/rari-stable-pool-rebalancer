@@ -1,16 +1,17 @@
-// TODO: Remove @ts-ignore
-
+import fs from 'fs';
 import Web3 from 'web3';
 
-const erc20Abi = require('./abi/ERC20.json');
-const cErc20DelegatorAbi = require('./compound/CErc20Delegator.json');
-const interestRateModelAbi = require('./compound/InterestRateModel.json');
+const erc20Abi = JSON.parse(fs.readFileSync(__dirname + '/../abi/ERC20.json', 'utf8'));
+const cErc20DelegatorAbi = JSON.parse(fs.readFileSync(__dirname + '/compound/CErc20Delegator.json', 'utf8'));
+const interestRateModelAbi = JSON.parse(fs.readFileSync(__dirname + '/compound/InterestRateModel.json', 'utf8'));
 
 export default class CompoundProtocol {
     web3: Web3;
     
     cErc20Contracts = {
-        "DAI": "0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3643"
+        "DAI": "0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3643",
+        "USDC": "0x39AA39c021dfbaE8faC545936693aC917d5E7563",
+        "USDT": "0xf650C3d88D12dB855b8bf7D11Be6C55A4e07dCC9"
     };
 
     constructor(web3: Web3) {
@@ -21,7 +22,7 @@ export default class CompoundProtocol {
         var erc20Contract = new this.web3.eth.Contract(erc20Abi, underlyingTokenAddress);
 
         try {
-            return await erc20Contract.methods.balanceOf(this.cErc20Contracts[currencyCode]).call();
+            return this.web3.utils.toBN(await erc20Contract.methods.balanceOf(this.cErc20Contracts[currencyCode]).call());
         } catch (error) {
             throw "Failed to get prior cash of cToken for " + currencyCode + ": " + error;
         }
@@ -31,7 +32,6 @@ export default class CompoundProtocol {
     async getSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyDifferenceBN) {
         if (["DAI", "USDT"].indexOf(currencyCode) < 0) throw "Invalid currency code";
         var totalCashBN = (await this.getCashPriorBN(currencyCode, underlyingTokenAddress)).add(supplyDifferenceBN);
-        
         var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCode]);
 
         try {
@@ -46,11 +46,11 @@ export default class CompoundProtocol {
             throw "Failed to get total reserves of cToken for " + currencyCode + ": " + error;
         }
 
-        var reserveFactorMantissa = currencyCode == "DAI" ? 50000000000000000 : 0;
+        var reserveFactorBN = this.web3.utils.toBN(currencyCode == "DAI" ? "50000000000000000" : 0);
         var interestRateModelContract = new this.web3.eth.Contract(interestRateModelAbi, currencyCode == "DAI" ? "0x000000007675b5e1da008f037a0800b309e0c493" : "0x6bc8fe27d0c7207733656595e73c0d5cf7afae36");
         
         try {
-            var totalReserves = await interestRateModelContract.methods.getSupplyRate(totalCashBN, totalBorrows, totalReserves, reserveFactorMantissa).call();
+            return this.web3.utils.toBN(await interestRateModelContract.methods.getSupplyRate(totalCashBN, totalBorrows, totalReserves, reserveFactorBN).call());
         } catch (error) {
             throw "Failed to get supply rate of cToken for " + currencyCode + ": " + error;
         }
@@ -58,7 +58,7 @@ export default class CompoundProtocol {
 
     // Exchange rate (scaled by 1e18)
     getUsdcExchangeRateBN(totalSupplyBN, totalCashBN, totalBorrowsBN, totalReservesBN) {
-        if (totalSupplyBN.eq(this.web3.utils.toBN(0))) return 200000000000000;
+        if (totalSupplyBN.isZero()) return this.web3.utils.toBN(200000000000000);
         else return totalCashBN.add(totalBorrowsBN).sub(totalReservesBN).sub(totalSupplyBN);
     }
 
@@ -66,26 +66,26 @@ export default class CompoundProtocol {
         var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts["USDC"]);
 
         try {
-            var totalBorrowsBN = await cErc20Contract.methods.totalBorrows().call();
+            var totalBorrowsBN = this.web3.utils.toBN(await cErc20Contract.methods.totalBorrows().call());
         } catch (error) {
             throw "Failed to get total borrows of cToken for USDC: " + error;
         }
 
         try {
-            var totalReservesBN = await cErc20Contract.methods.totalReserves().call();
+            var totalReservesBN = this.web3.utils.toBN(await cErc20Contract.methods.totalReserves().call());
         } catch (error) {
             throw "Failed to get total reserves of cToken for USDC: " + error;
         }
 
         try {
-            var totalSupplyBN = (await cErc20Contract.methods.totalSupply().call()).add(supplyDifferenceBN);
+            var totalSupplyBN = this.web3.utils.toBN(await cErc20Contract.methods.totalSupply().call()).add(supplyDifferenceBN);
         } catch (error) {
             throw "Failed to get total supply of cToken for USDC: " + error;
         }
         
         var totalCashBN = (await this.getCashPriorBN("USDC", underlyingTokenAddress)).add(supplyDifferenceBN);
         var exchangeRateBN = await this.getUsdcExchangeRateBN(totalSupplyBN, totalCashBN, totalBorrowsBN, totalReservesBN);
-        var reserveFactorBN = this.web3.utils.toBN(50000000000000000);
+        var reserveFactorBN = this.web3.utils.toBN("50000000000000000");
         
         /* We calculate the supply rate:
         *  underlying = totalSupply × exchangeRate
@@ -95,7 +95,7 @@ export default class CompoundProtocol {
         var interestRateModelContract = new this.web3.eth.Contract(interestRateModelAbi, "0x0c3f8df27e1a00b47653fde878d68d35f00714c0");
 
         try {
-            var borrowRateBN = await interestRateModelContract.methods.getBorrowRate(totalCashBN, totalBorrowsBN, 0).call(); // Total reserves = 0 because not used by WhitePaperInterestRateModel
+            var borrowRateBN = this.web3.utils.toBN(await interestRateModelContract.methods.getBorrowRate(totalCashBN, totalBorrowsBN, 0).call()); // Total reserves = 0 because not used by WhitePaperInterestRateModel
         } catch (error) {
             throw "Failed to get borrow rate of InterestRateModel for cToken for USDC: " + error;
         }
@@ -109,7 +109,7 @@ export default class CompoundProtocol {
 
     async predictApr(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN) {
         if (["DAI", "USDT"].indexOf(currencyCode) >= 0) return await this.getSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN);
-        if (["DAI", "USDT"].indexOf(currencyCode) >= 0) return await this.getUsdcSupplyRatePerBlockBN(underlyingTokenAddress, supplyWeiDifferenceBN);
+        else if (["USDC"].indexOf(currencyCode) >= 0) return await this.getUsdcSupplyRatePerBlockBN(underlyingTokenAddress, supplyWeiDifferenceBN);
         else throw "Currency code not supported by Compound implementation";
     }
 
@@ -123,6 +123,7 @@ export default class CompoundProtocol {
 
     async getApr(currencyCode) {
         if (!this.cErc20Contracts[currencyCode]) throw "No cToken known for currency code " + currencyCode;
+        // TODO: Remove @ts-ignore below
         // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
         var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCode]);
 
@@ -143,8 +144,9 @@ export default class CompoundProtocol {
 
     async getUnderlyingBalance(currencyCode) {
         if (!this.cErc20Contracts[currencyCode]) throw "Invalid currency code supplied to CompoundProtocol.getUnderlyingBalance";
+        // TODO: Remove @ts-ignore below
         // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
-        var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCodes[i]]);
+        var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCode]);
         
         try {
             var balanceOfUnderlying = await cErc20Contract.methods.balanceOfUnderlying(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS).call();
@@ -162,7 +164,7 @@ export default class CompoundProtocol {
         // For each currency
         for (var i = 0; i < currencyCodes.length; i++) {
             try {
-                balances[currencyCodes[i]] = this.getUnderlyingBalance(currencyCodes[i]);
+                balances[currencyCodes[i]] = await this.getUnderlyingBalance(currencyCodes[i]);
             } catch (error) {
                 console.log(error);
             }

@@ -1,5 +1,4 @@
 "use strict";
-// TODO: Remove @ts-ignore
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -9,14 +8,20 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-const erc20Abi = require('./abi/ERC20.json');
-const cErc20DelegatorAbi = require('./compound/CErc20Delegator.json');
-const interestRateModelAbi = require('./compound/InterestRateModel.json');
+const fs_1 = __importDefault(require("fs"));
+const erc20Abi = JSON.parse(fs_1.default.readFileSync(__dirname + '/../abi/ERC20.json', 'utf8'));
+const cErc20DelegatorAbi = JSON.parse(fs_1.default.readFileSync(__dirname + '/compound/CErc20Delegator.json', 'utf8'));
+const interestRateModelAbi = JSON.parse(fs_1.default.readFileSync(__dirname + '/compound/InterestRateModel.json', 'utf8'));
 class CompoundProtocol {
     constructor(web3) {
         this.cErc20Contracts = {
-            "DAI": "0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3643"
+            "DAI": "0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3643",
+            "USDC": "0x39AA39c021dfbaE8faC545936693aC917d5E7563",
+            "USDT": "0xf650C3d88D12dB855b8bf7D11Be6C55A4e07dCC9"
         };
         this.web3 = web3;
     }
@@ -24,7 +29,7 @@ class CompoundProtocol {
         return __awaiter(this, void 0, void 0, function* () {
             var erc20Contract = new this.web3.eth.Contract(erc20Abi, underlyingTokenAddress);
             try {
-                return yield erc20Contract.methods.balanceOf(this.cErc20Contracts[currencyCode]).call();
+                return this.web3.utils.toBN(yield erc20Contract.methods.balanceOf(this.cErc20Contracts[currencyCode]).call());
             }
             catch (error) {
                 throw "Failed to get prior cash of cToken for " + currencyCode + ": " + error;
@@ -50,10 +55,10 @@ class CompoundProtocol {
             catch (error) {
                 throw "Failed to get total reserves of cToken for " + currencyCode + ": " + error;
             }
-            var reserveFactorMantissa = currencyCode == "DAI" ? 50000000000000000 : 0;
+            var reserveFactorBN = this.web3.utils.toBN(currencyCode == "DAI" ? "50000000000000000" : 0);
             var interestRateModelContract = new this.web3.eth.Contract(interestRateModelAbi, currencyCode == "DAI" ? "0x000000007675b5e1da008f037a0800b309e0c493" : "0x6bc8fe27d0c7207733656595e73c0d5cf7afae36");
             try {
-                var totalReserves = yield interestRateModelContract.methods.getSupplyRate(totalCashBN, totalBorrows, totalReserves, reserveFactorMantissa).call();
+                return this.web3.utils.toBN(yield interestRateModelContract.methods.getSupplyRate(totalCashBN, totalBorrows, totalReserves, reserveFactorBN).call());
             }
             catch (error) {
                 throw "Failed to get supply rate of cToken for " + currencyCode + ": " + error;
@@ -62,8 +67,8 @@ class CompoundProtocol {
     }
     // Exchange rate (scaled by 1e18)
     getUsdcExchangeRateBN(totalSupplyBN, totalCashBN, totalBorrowsBN, totalReservesBN) {
-        if (totalSupplyBN.eq(this.web3.utils.toBN(0)))
-            return 200000000000000;
+        if (totalSupplyBN.isZero())
+            return this.web3.utils.toBN(200000000000000);
         else
             return totalCashBN.add(totalBorrowsBN).sub(totalReservesBN).sub(totalSupplyBN);
     }
@@ -71,26 +76,26 @@ class CompoundProtocol {
         return __awaiter(this, void 0, void 0, function* () {
             var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts["USDC"]);
             try {
-                var totalBorrowsBN = yield cErc20Contract.methods.totalBorrows().call();
+                var totalBorrowsBN = this.web3.utils.toBN(yield cErc20Contract.methods.totalBorrows().call());
             }
             catch (error) {
                 throw "Failed to get total borrows of cToken for USDC: " + error;
             }
             try {
-                var totalReservesBN = yield cErc20Contract.methods.totalReserves().call();
+                var totalReservesBN = this.web3.utils.toBN(yield cErc20Contract.methods.totalReserves().call());
             }
             catch (error) {
                 throw "Failed to get total reserves of cToken for USDC: " + error;
             }
             try {
-                var totalSupplyBN = (yield cErc20Contract.methods.totalSupply().call()).add(supplyDifferenceBN);
+                var totalSupplyBN = this.web3.utils.toBN(yield cErc20Contract.methods.totalSupply().call()).add(supplyDifferenceBN);
             }
             catch (error) {
                 throw "Failed to get total supply of cToken for USDC: " + error;
             }
             var totalCashBN = (yield this.getCashPriorBN("USDC", underlyingTokenAddress)).add(supplyDifferenceBN);
             var exchangeRateBN = yield this.getUsdcExchangeRateBN(totalSupplyBN, totalCashBN, totalBorrowsBN, totalReservesBN);
-            var reserveFactorBN = this.web3.utils.toBN(50000000000000000);
+            var reserveFactorBN = this.web3.utils.toBN("50000000000000000");
             /* We calculate the supply rate:
             *  underlying = totalSupply × exchangeRate
             *  borrowsPer = totalBorrows ÷ underlying
@@ -98,7 +103,7 @@ class CompoundProtocol {
             */
             var interestRateModelContract = new this.web3.eth.Contract(interestRateModelAbi, "0x0c3f8df27e1a00b47653fde878d68d35f00714c0");
             try {
-                var borrowRateBN = yield interestRateModelContract.methods.getBorrowRate(totalCashBN, totalBorrowsBN, 0).call(); // Total reserves = 0 because not used by WhitePaperInterestRateModel
+                var borrowRateBN = this.web3.utils.toBN(yield interestRateModelContract.methods.getBorrowRate(totalCashBN, totalBorrowsBN, 0).call()); // Total reserves = 0 because not used by WhitePaperInterestRateModel
             }
             catch (error) {
                 throw "Failed to get borrow rate of InterestRateModel for cToken for USDC: " + error;
@@ -114,7 +119,7 @@ class CompoundProtocol {
         return __awaiter(this, void 0, void 0, function* () {
             if (["DAI", "USDT"].indexOf(currencyCode) >= 0)
                 return yield this.getSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN);
-            if (["DAI", "USDT"].indexOf(currencyCode) >= 0)
+            else if (["USDC"].indexOf(currencyCode) >= 0)
                 return yield this.getUsdcSupplyRatePerBlockBN(underlyingTokenAddress, supplyWeiDifferenceBN);
             else
                 throw "Currency code not supported by Compound implementation";
@@ -131,6 +136,7 @@ class CompoundProtocol {
         return __awaiter(this, void 0, void 0, function* () {
             if (!this.cErc20Contracts[currencyCode])
                 throw "No cToken known for currency code " + currencyCode;
+            // TODO: Remove @ts-ignore below
             // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
             var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCode]);
             try {
@@ -154,8 +160,9 @@ class CompoundProtocol {
         return __awaiter(this, void 0, void 0, function* () {
             if (!this.cErc20Contracts[currencyCode])
                 throw "Invalid currency code supplied to CompoundProtocol.getUnderlyingBalance";
+            // TODO: Remove @ts-ignore below
             // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
-            var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCodes[i]]);
+            var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCode]);
             try {
                 var balanceOfUnderlying = yield cErc20Contract.methods.balanceOfUnderlying(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS).call();
             }
@@ -173,7 +180,7 @@ class CompoundProtocol {
             // For each currency
             for (var i = 0; i < currencyCodes.length; i++) {
                 try {
-                    balances[currencyCodes[i]] = this.getUnderlyingBalance(currencyCodes[i]);
+                    balances[currencyCodes[i]] = yield this.getUnderlyingBalance(currencyCodes[i]);
                 }
                 catch (error) {
                     console.log(error);

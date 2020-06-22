@@ -1,5 +1,5 @@
 import Web3 from 'web3';
-const https = require('https');
+import https from 'https';
 
 export default class ZeroExExchange {
     web3: Web3;
