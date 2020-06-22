@@ -61,7 +61,7 @@ class DydxProtocol {
             var secondsPerYearBN = this.web3.utils.toBN(60 * 60 * 24 * 365);
             var borrowInterestRatePerYearBN = borrowInterestRatePerSecondBN.mul(secondsPerYearBN);
             var earningsRateBN = this.web3.utils.toBN("950000000000000000");
-            return parseFloat(borrowInterestRatePerYearBN.mul(earningsRateBN).mul(borrowWeiBN).div(supplyWeiBN).divn(1e18).toString()) / 1e18; // borrowWeiBN.div(supplyWeiBN) = utilization/usage
+            return parseFloat(borrowInterestRatePerYearBN.mul(earningsRateBN).mul(borrowWeiBN).div(supplyWeiBN).div(this.web3.utils.toBN(1e18)).toString()) / 1e18; // borrowWeiBN.div(supplyWeiBN) = utilization/usage
         });
     }
     getApr(currencyCode) {
@@ -96,7 +96,7 @@ class DydxProtocol {
             var borrowWeiBN = this.parToWei(borrowParBN, borrowIndexBN);
             var supplyWeiBN = this.parToWei(supplyParBN, supplyIndexBN);
             var earningsRateBN = this.web3.utils.toBN("950000000000000000");
-            return parseFloat(borrowInterestRatePerYearBN.mul(earningsRateBN).mul(borrowWeiBN).div(supplyWeiBN).divn(1e18).toString()) / 1e18; // borrowWeiBN.div(supplyWeiBN) = utilization/usage
+            return parseFloat(borrowInterestRatePerYearBN.mul(earningsRateBN).mul(borrowWeiBN).div(supplyWeiBN).div(this.web3.utils.toBN(1e18)).toString()) / 1e18; // borrowWeiBN.div(supplyWeiBN) = utilization/usage
         });
     }
     getAprs(currencyCodes) {
