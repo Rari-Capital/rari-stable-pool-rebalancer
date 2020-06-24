@@ -10,5 +10,8 @@
   "license": "",
   "dependencies": {
     "web3": "^1.2.6"
+  },
+  "devDependencies": {
+    "typescript": "^3.9.5"
   }
 }

@@ -55,24 +55,42 @@ export default class ZeroExExchange {
                     decoded.orders.sort((a, b) => (a.makerAssetAmount / (a.takerAssetAmount + a.takerFee) < b.makerAssetAmount / (b.takerAssetAmount + b.takerFee)) ? 1 : -1);
 
                     var orders = [];
-                    var totalInputAmountBN = this.web3.utils.toBN(0);
+                    var inputFilledAmountBN = this.web3.utils.toBN(0);
                     var takerAssetFilledAmountBN = this.web3.utils.toBN(0);
             
                     for (var i = 0; i < decoded.orders.length; i++) {
                         if (decoded.orders[i].takerFee > 0 && decoded.orders[i].takerFeeAssetData !== "0xf47261b0000000000000000000000000" + inputTokenAddress) continue;
                         var takerAssetAmountBN = this.web3.utils.toBN(decoded.orders[i].takerAssetAmount);
                         var takerFeeBN = this.web3.utils.toBN(decoded.orders[i].takerFee);
-                        var orderMaxInputAmountBN = takerAssetAmountBN.add(takerFeeBN);
-                        if (this.web3.utils.toBN(decoded.orders[i].makerAssetAmount).lt(orderMaxInputAmountBN.mul(minMarginalOutputAmountBN).div(this.web3.utils.toBN(10).pow(this.web3.utils.toBN(inputTokenDecimals))))) break;
-                        var orderInputAmountBN = maxInputAmountBN.sub(totalInputAmountBN).lte(orderMaxInputAmountBN) ? maxInputAmountBN.sub(totalInputAmountBN) : orderMaxInputAmountBN;
-                        totalInputAmountBN.iadd(orderInputAmountBN);
-                        takerAssetFilledAmountBN.iadd(orderInputAmountBN.mul(takerAssetAmountBN).div(orderMaxInputAmountBN));
+                        var orderInputAmountBN = takerAssetAmountBN.add(takerFeeBN); // Maximum amount we can send to this order including the taker fee
+                        var makerAssetAmountBN = this.web3.utils.toBN(decoded.orders[i].makerAssetAmount);
+
+                        // Check minMarginalOutputAmountBN
+                        if (makerAssetAmountBN.lt(orderInputAmountBN.mul(minMarginalOutputAmountBN).div(this.web3.utils.toBN(10).pow(this.web3.utils.toBN(inputTokenDecimals))))) break;
+
+                        // Fill whole order by default
+                        var orderInputFillAmountBN = orderInputAmountBN;
+                        var orderTakerAssetFillAmountBN = takerAssetAmountBN;
+
+                        // Calculate orderInputFillAmountBN and orderTakerAssetFillAmountBN from the remaining maxInputAmountBN if we are limited by it
+                        if (maxInputAmountBN.sub(inputFilledAmountBN).lte(orderInputAmountBN)) {
+                            orderInputFillAmountBN = maxInputAmountBN.sub(inputFilledAmountBN);
+                            orderTakerAssetFillAmountBN = orderInputFillAmountBN.mul(takerAssetAmountBN).div(orderInputAmountBN);
+                        }
+
+                        // Add order to returned array
                         orders.push(decoded.orders[i]);
-                        if (totalInputAmountBN.gte(maxInputAmountBN)) break;
+
+                        // Add order fill amounts to total fill amounts
+                        inputFilledAmountBN.iadd(orderInputFillAmountBN);
+                        takerAssetFilledAmountBN.iadd(orderTakerAssetFillAmountBN);
+
+                        // Check if we have hit maxInputAmountBN
+                        if (inputFilledAmountBN.gte(maxInputAmountBN)) break;
                     }
 
                     if (takerAssetFilledAmountBN.isZero()) reject("No orders satisfying minMarginalOutputAmountBN found on 0x swap API");
-                    resolve([orders, totalInputAmountBN, decoded.protocolFee, takerAssetFilledAmountBN]);
+                    resolve([orders, inputFilledAmountBN, decoded.protocolFee, takerAssetFilledAmountBN]);
                 });
             }).on("error", (err) => {
                 reject("Error requesting quote from 0x swap API: " + err.message);

@@ -325,10 +325,10 @@ function setMaxTokenAllowances(unset = false) {
     return __awaiter(this, void 0, void 0, function* () {
         for (const poolName of Object.keys(db.pools))
             for (const currencyCode of Object.keys(db.pools[poolName].currencies))
-                setMaxTokenAllowanceToPool(poolName, currencyCode, unset);
+                yield setMaxTokenAllowanceToPool(poolName, currencyCode, unset);
         for (const currencyCode of Object.keys(db.currencies))
             if (currencyCode != "ETH")
-                setMaxTokenAllowanceTo0x(currencyCode, unset);
+                yield setMaxTokenAllowanceTo0x(currencyCode, unset);
     });
 }
 function setMaxTokenAllowanceToPool(poolName, currencyCode, unset = false) {
@@ -485,8 +485,8 @@ function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN = web
         for (var i = 0; i < pools.length; i++) {
             var minApr = pools[i + 1] ? pools[i + 1].supplyApr : 0;
             var maxBalanceDifferenceBN = totalBN.sub(db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN);
-            if (minApr == 0) {
-                // Set balance difference to maximum since there are no other non-zero APRs
+            if (!process.env.PROPORTIONAL_SUPPLY_BALANCING_ENABLED || minApr <= 0) {
+                // Set balance difference to maximum since there are no other APRs > 0
                 pools[i].balanceDifferenceBN = maxBalanceDifferenceBN;
                 pools[i].balanceBN = db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN.add(pools[i].balanceDifferenceBN);
                 // Set other pools' balances to 0 and break
@@ -539,7 +539,7 @@ function getBestCurrencyAndPool() {
         var bestApr = 0;
         for (const poolName of Object.keys(db.pools)) {
             for (const currencyCode of Object.keys(db.pools[poolName].currencies)) {
-                if (db.pools[poolName].currencies[currencyCode] && db.pools[poolName].currencies[currencyCode].supplyApr > bestApr) {
+                if (db.pools[poolName].currencies[currencyCode].supplyApr > bestApr) {
                     bestCurrencyCode = currencyCode;
                     bestPoolName = poolName;
                     bestApr = db.pools[poolName].currencies[currencyCode].supplyApr;
@@ -591,102 +591,105 @@ function tryBalanceSupply() {
             return console.warn("Cannot balance supply: supply balancing already in progress");
         db.isBalancingSupply = true;
         console.log("Trying to balance supply");
-        // Get best currency and pool for potential currency exchange
-        // TODO: Implement proportional currency rebalancing using APR predictions
-        try {
-            var [bestCurrencyCode, bestPoolName, bestApr] = yield getBestCurrencyAndPool();
-        }
-        catch (error) {
-            db.isBalancingSupply = false;
-            return console.error("Failed to get best currency and pool when trying to balance supply:", error);
-        }
         // Get seconds since last supply balancing (if we don't know the last time, assume it's been one year)
         // TODO: Get db.lastTimeBalanced from database instead of storing in a variable
         var epoch = (new Date()).getTime() / 1000;
         var secondsSinceLastSupplyBalancing = db.lastTimeBalanced > 0 ? epoch - db.lastTimeBalanced : 86400 * 7;
-        // Loop through tokens for exchanges to best currency code
-        for (const currencyCode of Object.keys(db.currencies))
-            if (currencyCode !== "ETH" && currencyCode !== bestCurrencyCode) {
-                // Convert a maximum of the currency's raw total balance at a maximum marginal output according to AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING
-                var maxInputAmountBN = getRawTotalBalanceBN(currencyCode);
-                if (maxInputAmountBN.gt(web3.utils.toBN(0))) {
-                    // Calculate min marginal output amount to exchange funds
-                    try {
-                        var price = yield zeroExExchange.getPrice(currencyCode, bestCurrencyCode);
-                    }
-                    catch (error) {
-                        db.isBalancingSupply = false;
-                        return console.error("Failed to get price from 0x API when trying to balance supply:", error);
-                    }
-                    try {
-                        var [bestPoolNameForThisCurrency, bestAprForThisCurrency] = yield getBestPoolByCurrency(currencyCode);
-                    }
-                    catch (error) {
-                        db.isBalancingSupply = false;
-                        return console.error("Failed to get best currency and pool when trying to balance supply:", error);
-                    }
-                    // TODO: Include miner fee and 0x protocol fee in calculation of min marginal output amount
-                    var maxMarginalOutputAmount = 1 / parseFloat(price);
-                    var minMarginalOutputAmountBN = web3.utils.toBN(maxMarginalOutputAmount * (1 - (parseFloat(process.env.AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING) * (bestApr - bestAprForThisCurrency) * (secondsSinceLastSupplyBalancing / 86400 / 365))) * (Math.pow(10, db.currencies[bestCurrencyCode].decimals)));
-                    // Get estimated filled input amount from 0x swap API
-                    try {
-                        var [orders, estimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
-                    }
-                    catch (error) {
-                        db.isBalancingSupply = false;
-                        return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
-                    }
-                    // Withdraw estimatedInputAmountBN tokens from pools in order of lowest to highest supply rate
-                    var pools = db.currencies[currencyCode].pools.slice();
-                    pools.sort((a, b) => (a.supplyApr > b.supplyApr) ? 1 : -1);
-                    for (const poolName of Object.keys(pools)) {
-                        if (db.currencies[currencyCode].fundManagerContractBalanceBN.gte(estimatedInputAmountBN))
-                            break;
-                        var leftBN = estimatedInputAmountBN.sub(db.currencies[currencyCode].fundManagerContractBalanceBN);
-                        var withdrawalAmountBN = leftBN.lte(db.pools[poolName].currencies[currencyCode].poolBalanceBN) ? leftBN : db.pools[poolName].currencies[currencyCode].poolBalanceBN;
-                        // TODO: Don't execute a supply removal if not above a threshold
+        if (process.env.AUTOMATIC_TOKEN_EXCHANGE_ENABLED) {
+            // Get best currency and pool for potential currency exchange
+            // TODO: Implement proportional currency rebalancing using APR predictions
+            try {
+                var [bestCurrencyCode, bestPoolName, bestApr] = yield getBestCurrencyAndPool();
+            }
+            catch (error) {
+                db.isBalancingSupply = false;
+                return console.error("Failed to get best currency and pool when trying to balance supply:", error);
+            }
+            // Loop through tokens for exchanges to best currency code
+            for (const currencyCode of Object.keys(db.currencies))
+                if (currencyCode !== "ETH" && currencyCode !== bestCurrencyCode) {
+                    // Convert a maximum of the currency's raw total balance at a maximum marginal output according to AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING
+                    var maxInputAmountBN = getRawTotalBalanceBN(currencyCode);
+                    if (maxInputAmountBN.gt(web3.utils.toBN(0))) {
+                        // Calculate min marginal output amount to exchange funds
                         try {
-                            var txid = yield removeFunds(poolName, currencyCode, withdrawalAmountBN, withdrawalAmountBN.eq(db.pools[poolName].currencies[currencyCode].poolBalanceBN));
+                            var price = yield zeroExExchange.getPrice(currencyCode, bestCurrencyCode);
                         }
                         catch (error) {
-                            console.error("Failed to remove funds from pool " + poolName + " when balancing supply of " + currencyCode + " before token exchange: " + error);
-                            continue;
+                            db.isBalancingSupply = false;
+                            return console.error("Failed to get price from 0x API when trying to balance supply:", error);
                         }
-                        // Update balances
-                        db.pools[poolName].currencies[currencyCode].poolBalanceBN.isub(withdrawalAmountBN);
-                        db.currencies[currencyCode].fundManagerContractBalanceBN.iadd(withdrawalAmountBN);
-                    }
-                    // Exchange tokens!
-                    try {
-                        var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee));
-                    }
-                    catch (error) {
-                        // Retry up to 2 more times
-                        for (var i = 0; i < 3; i++) {
-                            try {
-                                var [orders, newEstimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, estimatedInputAmountBN, minMarginalOutputAmountBN);
-                            }
-                            catch (error) {
-                                db.isBalancingSupply = false;
-                                return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
-                            }
-                            try {
-                                var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee));
+                        try {
+                            var [bestPoolNameForThisCurrency, bestAprForThisCurrency] = yield getBestPoolByCurrency(currencyCode);
+                        }
+                        catch (error) {
+                            db.isBalancingSupply = false;
+                            return console.error("Failed to get best currency and pool when trying to balance supply:", error);
+                        }
+                        // TODO: Include miner fee and 0x protocol fee in calculation of min marginal output amount
+                        // TODO: Are we sure we want to use stablecoin trade prices and not $1 flat for slippage calculations? Same question goes for the web client (which currently uses $1 flat and not stablecoin trade prices since RariFundManager assumes all tokens are worth $1)
+                        var maxMarginalOutputAmount = 1 / parseFloat(price);
+                        var minMarginalOutputAmountBN = web3.utils.toBN(Math.trunc(maxMarginalOutputAmount * (1 - (parseFloat(process.env.AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING) * (bestApr - bestAprForThisCurrency) * (secondsSinceLastSupplyBalancing / 86400 / 365))) * (Math.pow(10, db.currencies[bestCurrencyCode].decimals))));
+                        // Get estimated filled input amount from 0x swap API
+                        try {
+                            var [orders, estimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
+                        }
+                        catch (error) {
+                            db.isBalancingSupply = false;
+                            return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+                        }
+                        // Withdraw estimatedInputAmountBN tokens from pools in order of lowest to highest supply rate
+                        var poolNames = Object.keys(db.pools);
+                        poolNames.sort((a, b) => (db.pools[a].supplyApr > db.pools[b].supplyApr) ? 1 : -1);
+                        for (const poolName of poolNames) {
+                            if (db.currencies[currencyCode].fundManagerContractBalanceBN.gte(estimatedInputAmountBN))
                                 break;
+                            var leftBN = estimatedInputAmountBN.sub(db.currencies[currencyCode].fundManagerContractBalanceBN);
+                            var withdrawalAmountBN = leftBN.lte(db.pools[poolName].currencies[currencyCode].poolBalanceBN) ? leftBN : db.pools[poolName].currencies[currencyCode].poolBalanceBN;
+                            // TODO: Don't execute a supply removal if not above a threshold
+                            try {
+                                var txid = yield removeFunds(poolName, currencyCode, withdrawalAmountBN, withdrawalAmountBN.eq(db.pools[poolName].currencies[currencyCode].poolBalanceBN));
                             }
                             catch (error) {
-                                // Stop trying on 3rd error
-                                if (i == 3) {
+                                console.error("Failed to remove funds from pool " + poolName + " when balancing supply of " + currencyCode + " before token exchange: " + error);
+                                continue;
+                            }
+                            // Update balances
+                            db.pools[poolName].currencies[currencyCode].poolBalanceBN.isub(withdrawalAmountBN);
+                            db.currencies[currencyCode].fundManagerContractBalanceBN.iadd(withdrawalAmountBN);
+                        }
+                        // Exchange tokens!
+                        try {
+                            var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee));
+                        }
+                        catch (error) {
+                            // Retry up to 2 more times
+                            for (var i = 0; i < 3; i++) {
+                                try {
+                                    var [orders, newEstimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, estimatedInputAmountBN, minMarginalOutputAmountBN);
+                                }
+                                catch (error) {
                                     db.isBalancingSupply = false;
-                                    return console.error("Failed 3 times to exchange", currencyCode, "to", bestCurrencyCode, "when balancing supply:", error);
+                                    return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+                                }
+                                try {
+                                    var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee));
+                                    break;
+                                }
+                                catch (error) {
+                                    // Stop trying on 3rd error
+                                    if (i == 3) {
+                                        db.isBalancingSupply = false;
+                                        return console.error("Failed 3 times to exchange", currencyCode, "to", bestCurrencyCode, "when balancing supply:", error);
+                                    }
                                 }
                             }
                         }
+                        yield checkTokenBalances(currencyCode);
+                        yield checkTokenBalances(bestCurrencyCode);
                     }
-                    yield checkTokenBalances(currencyCode);
-                    yield checkTokenBalances(bestCurrencyCode);
                 }
-            }
+        }
         // Loop through tokens again for rebalancing across pools
         for (const currencyCode of Object.keys(db.currencies))
             if (currencyCode !== "ETH") {
