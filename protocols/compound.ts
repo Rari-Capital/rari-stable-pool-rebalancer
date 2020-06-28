@@ -3,6 +3,7 @@ import Web3 from 'web3';
 
 const erc20Abi = JSON.parse(fs.readFileSync(__dirname + '/../abi/ERC20.json', 'utf8'));
 const cErc20DelegatorAbi = JSON.parse(fs.readFileSync(__dirname + '/compound/CErc20Delegator.json', 'utf8'));
+const comptrollerAbi = JSON.parse(fs.readFileSync(__dirname + '/compound/Comptroller.json', 'utf8'));
 const interestRateModelAbi = JSON.parse(fs.readFileSync(__dirname + '/compound/InterestRateModel.json', 'utf8'));
 
 export default class CompoundProtocol {
@@ -13,6 +14,8 @@ export default class CompoundProtocol {
         "USDC": "0x39AA39c021dfbaE8faC545936693aC917d5E7563",
         "USDT": "0xf650C3d88D12dB855b8bf7D11Be6C55A4e07dCC9"
     };
+
+    comptrollerContract = "0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B";
 
     constructor(web3: Web3) {
         this.web3 = web3;
@@ -171,5 +174,49 @@ export default class CompoundProtocol {
         }
 
         return balances;
+    }
+
+    async claimComp() {
+        // TODO: Remove @ts-ignore below
+        // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
+        var cErc20Contract = new this.web3.eth.Contract(comptrollerAbi, this.comptrollerContract);
+        
+        // Create claimComp transaction
+        var data = cErc20Contract.methods.claimComp().encodeABI();
+
+        // Build transaction
+        var tx = {
+            from: process.env.ETHEREUM_ADMIN_ACCOUNT,
+            to: this.comptrollerContract,
+            value: 0,
+            data: data,
+            nonce: await this.web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
+        };
+
+        if (process.env.NODE_ENV !== "production") console.log("Claiming COMP:", tx);
+
+        // Estimate gas for transaction
+        try {
+            tx["gas"] = await this.web3.eth.estimateGas(tx);
+        } catch (error) {
+            throw "Failed to estimate gas before signing and sending transaction for claimComp: " + error;
+        }
+        
+        // Sign transaction
+        try {
+            var signedTx = await this.web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
+        } catch (error) {
+            throw "Error signing transaction for claimComp: " + error;
+        }
+
+        // Send transaction
+        try {
+            var sentTx = await this.web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+        } catch (error) {
+            throw "Error sending transaction for claimComp: " + error;
+        }
+        
+        console.log("Successfully claimed COMP:", sentTx);
+        return sentTx;
     }
 }

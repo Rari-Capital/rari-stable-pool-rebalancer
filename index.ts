@@ -177,13 +177,21 @@ async function tryOwnerWithdrawAllCurrencies() {
 }
 
 async function tryOwnerWithdrawCurrency(currencyCode) {
+    if (currencyCode == "COMP") {
+        try {
+            await compoundProtocol.claimComp();
+        } catch (error) {
+            return console.error("Error when claiming COMP:", error);
+        }
+    }
+
     try {
         var balance = await (currencyCode == "ETH" ? web3.eth.getBalance(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS) : (new web3.eth.Contract(erc20Abi, db.ownerWithdrawableCurrencies[currencyCode].tokenAddress)).methods.balanceOf(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS).call());
     } catch (error) {
-        throw "Error when retreiving " + currencyCode + " balance of admin account before trying to withdraw owner currencies: " + error;
+        return console.error("Error when retreiving ", currencyCode, " balance of admin account before trying to withdraw to owner:", error);
     }
 
-    if (web3.utils.toBN(balance).isZero()) return null;
+    if (web3.utils.toBN(balance).isZero()) return;
     return await ownerWithdrawCurrency(currencyCode);
 }
 
