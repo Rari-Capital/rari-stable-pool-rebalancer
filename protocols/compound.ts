@@ -33,7 +33,7 @@ export default class CompoundProtocol {
     }
 
     // DAI & USDT
-    async getSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyDifferenceBN) {
+    async predictDaiUsdtSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyDifferenceBN) {
         if (["DAI", "USDT"].indexOf(currencyCode) < 0) throw "Invalid currency code";
         var totalCashBN = (await this.getCashPriorBN(currencyCode, underlyingTokenAddress)).add(supplyDifferenceBN);
         var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCode]);
@@ -66,7 +66,7 @@ export default class CompoundProtocol {
         else return totalCashBN.add(totalBorrowsBN).sub(totalReservesBN).sub(totalSupplyBN);
     }
 
-    async getUsdcSupplyRatePerBlockBN(underlyingTokenAddress, supplyDifferenceBN) {
+    async predictUsdcSupplyRatePerBlockBN(underlyingTokenAddress, supplyDifferenceBN) {
         var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts["USDC"]);
 
         try {
@@ -111,10 +111,14 @@ export default class CompoundProtocol {
         return supplyRateBN;
     }
 
-    async predictApr(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN) {
-        if (["DAI", "USDT"].indexOf(currencyCode) >= 0) return await this.getSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN);
-        else if (["USDC"].indexOf(currencyCode) >= 0) return await this.getUsdcSupplyRatePerBlockBN(underlyingTokenAddress, supplyWeiDifferenceBN);
+    async predictSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN) {
+        if (["DAI", "USDT"].indexOf(currencyCode) >= 0) return await this.predictDaiUsdtSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN);
+        else if (["USDC"].indexOf(currencyCode) >= 0) return await this.predictUsdcSupplyRatePerBlockBN(underlyingTokenAddress, supplyWeiDifferenceBN);
         else throw "Currency code not supported by Compound implementation";
+    }
+
+    async predictApr(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN) {
+        return this.supplyRatePerBlockToApr((await this.predictSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN)).toString());
     }
 
     supplyRatePerBlockToApr(supplyRatePerBlock) {
@@ -125,19 +129,21 @@ export default class CompoundProtocol {
         return apr;
     }
 
-    async getApr(currencyCode) {
+    async getSupplyRatePerBlock(currencyCode) {
         if (!this.cErc20Contracts[currencyCode]) throw "No cToken known for currency code " + currencyCode;
         // TODO: Remove @ts-ignore below
         // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
         var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCode]);
 
         try {
-            var supplyRatePerBlock = await cErc20Contract.methods.supplyRatePerBlock().call();
+            return await cErc20Contract.methods.supplyRatePerBlock().call();
         } catch (error) {
             throw "Failed to get Compound " + currencyCode + " supplyRatePerBlock: " + error;
         }
+    }
 
-        return this.supplyRatePerBlockToApr(supplyRatePerBlock);
+    async getApr(currencyCode) {
+        return this.supplyRatePerBlockToApr(await this.getSupplyRatePerBlock(currencyCode));
     }
 
     async getAprs(currencyCodes) {

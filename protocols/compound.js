@@ -13,8 +13,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs_1 = __importDefault(require("fs"));
+const https_1 = __importDefault(require("https"));
 const erc20Abi = JSON.parse(fs_1.default.readFileSync(__dirname + '/../abi/ERC20.json', 'utf8'));
 const cErc20DelegatorAbi = JSON.parse(fs_1.default.readFileSync(__dirname + '/compound/CErc20Delegator.json', 'utf8'));
+const comptrollerAbi = JSON.parse(fs_1.default.readFileSync(__dirname + '/compound/Comptroller.json', 'utf8'));
 const interestRateModelAbi = JSON.parse(fs_1.default.readFileSync(__dirname + '/compound/InterestRateModel.json', 'utf8'));
 class CompoundProtocol {
     constructor(web3) {
@@ -23,6 +25,7 @@ class CompoundProtocol {
             "USDC": "0x39AA39c021dfbaE8faC545936693aC917d5E7563",
             "USDT": "0xf650C3d88D12dB855b8bf7D11Be6C55A4e07dCC9"
         };
+        this.comptrollerContract = "0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B";
         this.web3 = web3;
     }
     getCashPriorBN(currencyCode, underlyingTokenAddress) {
@@ -37,7 +40,7 @@ class CompoundProtocol {
         });
     }
     // DAI & USDT
-    getSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyDifferenceBN) {
+    predictDaiUsdtSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyDifferenceBN) {
         return __awaiter(this, void 0, void 0, function* () {
             if (["DAI", "USDT"].indexOf(currencyCode) < 0)
                 throw "Invalid currency code";
@@ -72,7 +75,7 @@ class CompoundProtocol {
         else
             return totalCashBN.add(totalBorrowsBN).sub(totalReservesBN).sub(totalSupplyBN);
     }
-    getUsdcSupplyRatePerBlockBN(underlyingTokenAddress, supplyDifferenceBN) {
+    predictUsdcSupplyRatePerBlockBN(underlyingTokenAddress, supplyDifferenceBN) {
         return __awaiter(this, void 0, void 0, function* () {
             var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts["USDC"]);
             try {
@@ -115,14 +118,19 @@ class CompoundProtocol {
             return supplyRateBN;
         });
     }
-    predictApr(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN) {
+    predictSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN) {
         return __awaiter(this, void 0, void 0, function* () {
             if (["DAI", "USDT"].indexOf(currencyCode) >= 0)
-                return yield this.getSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN);
+                return yield this.predictDaiUsdtSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN);
             else if (["USDC"].indexOf(currencyCode) >= 0)
-                return yield this.getUsdcSupplyRatePerBlockBN(underlyingTokenAddress, supplyWeiDifferenceBN);
+                return yield this.predictUsdcSupplyRatePerBlockBN(underlyingTokenAddress, supplyWeiDifferenceBN);
             else
                 throw "Currency code not supported by Compound implementation";
+        });
+    }
+    predictApr(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN) {
+        return __awaiter(this, void 0, void 0, function* () {
+            return this.supplyRatePerBlockToApr((yield this.predictSupplyRatePerBlockBN(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN)).toString());
         });
     }
     supplyRatePerBlockToApr(supplyRatePerBlock) {
@@ -132,7 +140,7 @@ class CompoundProtocol {
         var apr = (supplyRatePerBlock / 1e18) * blocksPerYear;
         return apr;
     }
-    getApr(currencyCode) {
+    getSupplyRatePerBlock(currencyCode) {
         return __awaiter(this, void 0, void 0, function* () {
             if (!this.cErc20Contracts[currencyCode])
                 throw "No cToken known for currency code " + currencyCode;
@@ -140,12 +148,16 @@ class CompoundProtocol {
             // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
             var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCode]);
             try {
-                var supplyRatePerBlock = yield cErc20Contract.methods.supplyRatePerBlock().call();
+                return yield cErc20Contract.methods.supplyRatePerBlock().call();
             }
             catch (error) {
                 throw "Failed to get Compound " + currencyCode + " supplyRatePerBlock: " + error;
             }
-            return this.supplyRatePerBlockToApr(supplyRatePerBlock);
+        });
+    }
+    getApr(currencyCode) {
+        return __awaiter(this, void 0, void 0, function* () {
+            return this.supplyRatePerBlockToApr(yield this.getSupplyRatePerBlock(currencyCode));
         });
     }
     getAprs(currencyCodes) {
@@ -187,6 +199,119 @@ class CompoundProtocol {
                 }
             }
             return balances;
+        });
+    }
+    claimComp() {
+        return __awaiter(this, void 0, void 0, function* () {
+            // TODO: Remove @ts-ignore below
+            // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
+            var cErc20Contract = new this.web3.eth.Contract(comptrollerAbi, this.comptrollerContract);
+            // Create claimComp transaction
+            var data = cErc20Contract.methods.claimComp().encodeABI();
+            // Build transaction
+            var tx = {
+                from: process.env.ETHEREUM_ADMIN_ACCOUNT,
+                to: this.comptrollerContract,
+                value: 0,
+                data: data,
+                nonce: yield this.web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
+            };
+            if (process.env.NODE_ENV !== "production")
+                console.log("Claiming COMP:", tx);
+            // Estimate gas for transaction
+            try {
+                tx["gas"] = yield this.web3.eth.estimateGas(tx);
+            }
+            catch (error) {
+                throw "Failed to estimate gas before signing and sending transaction for claimComp: " + error;
+            }
+            // Sign transaction
+            try {
+                var signedTx = yield this.web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
+            }
+            catch (error) {
+                throw "Error signing transaction for claimComp: " + error;
+            }
+            // Send transaction
+            try {
+                var sentTx = yield this.web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+            }
+            catch (error) {
+                throw "Error sending transaction for claimComp: " + error;
+            }
+            console.log("Successfully claimed COMP:", sentTx);
+            return sentTx;
+        });
+    }
+    getCurrencyUsdRates(currencyCodes) {
+        return new Promise((resolve, reject) => {
+            https_1.default.get('https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=' + currencyCodes.join(','), {
+                headers: {
+                    'X-CMC_PRO_API_KEY': process.env.CMC_PRO_API_KEY
+                }
+            }, (resp) => {
+                let data = '';
+                // A chunk of data has been recieved
+                resp.on('data', (chunk) => {
+                    data += chunk;
+                });
+                // The whole response has been received
+                resp.on('end', () => {
+                    var decoded = JSON.parse(data);
+                    if (!decoded || !decoded.data)
+                        reject("Failed to decode USD exchange rates from CoinMarketCap");
+                    var prices = {};
+                    for (const key of Object.keys(decoded.data))
+                        prices[key] = decoded.data[key].quote.USD.price;
+                    resolve(prices);
+                });
+            }).on("error", (err) => {
+                reject("Error requesting currency rates from CoinMarketCap: " + err.message);
+            });
+        });
+    }
+    getSupplyRatePerBlockFromComp(currencyCode) {
+        return new Promise((resolve, reject) => {
+            https_1.default.get('https://api.compound.finance/api/v2/ctoken', function (data) {
+                return __awaiter(this, void 0, void 0, function* () {
+                    // Get cToken USD prices
+                    var currencyCodes = ["COMP"];
+                    for (const cToken of data.cToken)
+                        currencyCodes.push(cToken.underlying_symbol);
+                    var prices = yield this.getCurrencyUsdRates(currencyCodes);
+                    // Get currency APY and total yearly interest
+                    var totalYearlyInterestUsd = 0;
+                    var tokenApy = 0;
+                    for (const cToken of data.cToken) {
+                        totalYearlyInterestUsd += cToken.total_supply.value * cToken.exchange_rate.value * prices[cToken.underlying_symbol] * cToken.supply_rate.value;
+                        if (cToken.underlying_symbol === currencyCode)
+                            tokenApy = cToken.supply_rate.value;
+                    }
+                    // Get APY from COMP per block for this currency
+                    var tokenCompPerBlockPerUsd = 0.5 * (tokenApy / totalYearlyInterestUsd);
+                    var tokenUsdFromCompPerBlockPerUsd = tokenCompPerBlockPerUsd * prices["COMP"];
+                    var tokenCompSupplyRatePerBlock = tokenUsdFromCompPerBlockPerUsd * 2102400;
+                    resolve(tokenCompSupplyRatePerBlock * 1e18);
+                });
+            });
+        });
+    }
+    getAprFromComp(currencyCode) {
+        return __awaiter(this, void 0, void 0, function* () {
+            return this.supplyRatePerBlockToApr(yield this.getSupplyRatePerBlockFromComp(currencyCode));
+        });
+    }
+    getAprWithComp(currencyCode) {
+        return __awaiter(this, void 0, void 0, function* () {
+            return (yield this.getApr(currencyCode)) + (yield this.getAprFromComp(currencyCode));
+        });
+    }
+    getAprsWithComp(currencyCodes) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var aprs = {};
+            for (var i = 0; i < currencyCodes.length; i++)
+                aprs[currencyCodes[i]] = yield this.getAprFromComp(currencyCodes[i]);
+            return aprs;
         });
     }
 }
