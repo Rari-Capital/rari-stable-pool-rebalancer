@@ -81,7 +81,6 @@ var db = {
         }
     },
     isBalancingSupply: false,
-    lastTimeBalanced: 0,
     ownerWithdrawableCurrencies: {
         "ETH": {},
         "COMP": {
@@ -597,11 +596,6 @@ async function tryBalanceSupply() {
     db.isBalancingSupply = true;
     console.log("Trying to balance supply");
 
-    // Get seconds since last supply balancing (if we don't know the last time, assume it's been one year)
-    // TODO: Get db.lastTimeBalanced from database instead of storing in a variable
-    var epoch = (new Date()).getTime() / 1000;
-    var secondsSinceLastSupplyBalancing = db.lastTimeBalanced > 0 ? epoch - db.lastTimeBalanced : 86400 * 7;
-
     if (process.env.AUTOMATIC_TOKEN_EXCHANGE_ENABLED) {
         // Get best currency and pool for potential currency exchange
         // TODO: Implement proportional currency rebalancing using APR predictions
@@ -633,10 +627,15 @@ async function tryBalanceSupply() {
                     return console.error("Failed to get best currency and pool when trying to balance supply:", error);
                 }
 
+                // Get seconds since last supply balancing (if we don't know the last time, assume it's been one week)
+                // TODO: Get lastTimeBalanced from a database instead of storing in a variable
+                var epoch = (new Date()).getTime() / 1000;
+                var secondsSinceLastExchange = db.lastTimeExchanged > 0 ? epoch - db.lastTimeExchanged : 86400 * 7;
+
                 // TODO: Include miner fee and 0x protocol fee in calculation of min marginal output amount
                 // TODO: Are we sure we want to use stablecoin trade prices and not $1 flat for slippage calculations? Same question goes for the web client (which currently uses $1 flat and not stablecoin trade prices since RariFundManager assumes all tokens are worth $1)
                 var maxMarginalOutputAmount = 1 / parseFloat(price);
-                var minMarginalOutputAmountBN = web3.utils.toBN(Math.trunc(maxMarginalOutputAmount * (1 - (parseFloat(process.env.AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING) * (bestApr - bestAprForThisCurrency) * (secondsSinceLastSupplyBalancing / 86400 / 365))) * (10 ** db.currencies[bestCurrencyCode].decimals)));
+                var minMarginalOutputAmountBN = web3.utils.toBN(Math.trunc(maxMarginalOutputAmount * (1 - (parseFloat(process.env.AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_EXCHANGE) * (bestApr - bestAprForThisCurrency) * (secondsSinceLastExchange / 86400 / 365))) * (10 ** db.currencies[bestCurrencyCode].decimals)));
 
                 // Get estimated filled input amount from 0x swap API
                 try {
@@ -734,11 +733,16 @@ async function tryBalanceSupply() {
         
             var maxEthereumMinerFees = parseInt(maxEthereumMinerFeesBN.toString()); // TODO: BN.prototype.toNumber replacement
             var maxMinerFeesUsd = maxEthereumMinerFees / Math.pow(10, 18) * db.currencies["ETH"].usdRate;
+
+            // Get seconds since last supply balancing (if we don't know the last time, assume it's been one week)
+            // TODO: Get lastTimeBalanced from a database instead of storing in a variable
+            var epoch = (new Date()).getTime() / 1000;
+            var secondsSinceLastSupplyBalancing = db.currencies[currencyCode].lastTimeBalanced > 0 ? epoch - db.currencies[currencyCode].lastTimeBalanced : 86400 * 7;
         
-            // Check AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE
-            if (expectedAdditionalYearlyInterestUsd * secondsSinceLastSupplyBalancing / maxMinerFeesUsd < parseFloat(process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE)) {
+            // Check AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD
+            if (expectedAdditionalYearlyInterestUsd * (secondsSinceLastSupplyBalancing / 86400 / 365) / maxMinerFeesUsd < parseFloat(process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD)) {
                 db.isBalancingSupply = false;
-                return console.log("Not balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", secondsSinceLastSupplyBalancing, "/", maxMinerFeesUsd, "is less than", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE);
+                return console.log("Not balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", (secondsSinceLastSupplyBalancing / 86400 / 365), "/", maxMinerFeesUsd, "is less than", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD);
             }
     
             console.log("Balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", secondsSinceLastSupplyBalancing, "/", maxMinerFeesUsd, "is at least", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ALGORITHMIC_NET_VALUE);
