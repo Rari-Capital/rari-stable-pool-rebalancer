@@ -1,4 +1,5 @@
 import fs from 'fs';
+import https from 'https';
 import Web3 from 'web3';
 
 const erc20Abi = JSON.parse(fs.readFileSync(__dirname + '/../abi/ERC20.json', 'utf8'));
