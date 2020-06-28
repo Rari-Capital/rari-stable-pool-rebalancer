@@ -313,7 +313,7 @@ function getAllAprs() {
                 if (key === "dYdX")
                     var aprs = yield dydxProtocol.getAprs(Object.keys(db.pools[key].currencies));
                 else if (key == "Compound")
-                    var aprs = yield compoundProtocol.getAprs(Object.keys(db.pools[key].currencies));
+                    var aprs = yield compoundProtocol.getAprsWithComp(Object.keys(db.pools[key].currencies));
                 else
                     return console.error("Failed to get APRs for unrecognized pool:", key);
             }
@@ -398,7 +398,7 @@ function predictApr(currencyCode, poolName, balanceDifferenceBN) {
         if (poolName === "dYdX")
             return yield dydxProtocol.predictApr(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
         else if (poolName == "Compound")
-            return yield compoundProtocol.predictApr(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
+            return yield compoundProtocol.predictAprWithComp(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
         else
             throw "Failed to predict APR for unrecognized pool: " + poolName;
     });

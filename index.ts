@@ -304,7 +304,7 @@ async function getAllAprs() {
     for (const key of Object.keys(db.pools)) {
         try {
             if (key === "dYdX") var aprs = await dydxProtocol.getAprs(Object.keys(db.pools[key].currencies));
-            else if (key == "Compound") var aprs = await compoundProtocol.getAprs(Object.keys(db.pools[key].currencies));
+            else if (key == "Compound") var aprs = await compoundProtocol.getAprsWithComp(Object.keys(db.pools[key].currencies));
             else return console.error("Failed to get APRs for unrecognized pool:", key);
         } catch (error) {
             console.error("Failed to get APRs for", key, "pool:", error);
@@ -390,7 +390,7 @@ async function updateCurrencyUsdRates() {
 
 async function predictApr(currencyCode, poolName, balanceDifferenceBN) {
     if (poolName === "dYdX") return await dydxProtocol.predictApr(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
-    else if (poolName == "Compound") return await compoundProtocol.predictApr(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
+    else if (poolName == "Compound") return await compoundProtocol.predictAprWithComp(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
     else throw "Failed to predict APR for unrecognized pool: " + poolName;
 }
 
