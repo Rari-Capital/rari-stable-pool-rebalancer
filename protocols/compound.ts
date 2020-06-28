@@ -219,4 +219,73 @@ export default class CompoundProtocol {
         console.log("Successfully claimed COMP:", sentTx);
         return sentTx;
     }
+    
+    getCurrencyUsdRates(currencyCodes) {
+        return new Promise((resolve, reject) => {
+            https.get('https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=' + currencyCodes.join(','), {
+                headers: {
+                    'X-CMC_PRO_API_KEY': process.env.CMC_PRO_API_KEY
+                }
+            }, (resp) => {
+                let data = '';
+    
+                // A chunk of data has been recieved
+                resp.on('data', (chunk) => {
+                    data += chunk;
+                });
+    
+                // The whole response has been received
+                resp.on('end', () => {
+                    var decoded = JSON.parse(data);
+                    if (!decoded || !decoded.data) reject("Failed to decode USD exchange rates from CoinMarketCap");
+    
+                    var prices = {};
+                    for (const key of Object.keys(decoded.data)) prices[key] = decoded.data[key].quote.USD.price;
+                    resolve(prices);
+                });
+            }).on("error", (err) => {
+                reject("Error requesting currency rates from CoinMarketCap: " + err.message);
+            });
+        });
+    }
+
+    getSupplyRatePerBlockFromComp(currencyCode) {
+        return new Promise((resolve, reject) => {
+            https.get('https://api.compound.finance/api/v2/ctoken', async function (data) {
+                // Get cToken USD prices
+                var currencyCodes = ["COMP"];
+                for (const cToken of data.cToken) currencyCodes.push(cToken.underlying_symbol);
+                var prices = await this.getCurrencyUsdRates(currencyCodes);
+                
+                // Get currency APY and total yearly interest
+                var totalYearlyInterestUsd = 0;
+                var tokenApy = 0;
+                
+                for (const cToken of data.cToken) {
+                    totalYearlyInterestUsd += cToken.total_supply.value * cToken.exchange_rate.value * prices[cToken.underlying_symbol] * cToken.supply_rate.value;
+                    if (cToken.underlying_symbol === currencyCode) tokenApy = cToken.supply_rate.value;
+                }
+                
+                // Get APY from COMP per block for this currency
+                var tokenCompPerBlockPerUsd = 0.5 * (tokenApy / totalYearlyInterestUsd);
+                var tokenUsdFromCompPerBlockPerUsd = tokenCompPerBlockPerUsd * prices["COMP"];
+                var tokenCompSupplyRatePerBlock = tokenUsdFromCompPerBlockPerUsd * 2102400;
+                resolve(tokenCompSupplyRatePerBlock * 1e18);
+            });
+        });
+    }
+
+    async getAprFromComp(currencyCode) {
+        return this.supplyRatePerBlockToApr(await this.getSupplyRatePerBlockFromComp(currencyCode));
+    }
+
+    async getAprWithComp(currencyCode) {
+        return await this.getApr(currencyCode) + await this.getAprFromComp(currencyCode);
+    }
+
+    async getAprsWithComp(currencyCodes) {
+        var aprs = {};
+        for (var i = 0; i < currencyCodes.length; i++) aprs[currencyCodes[i]] = await this.getAprFromComp(currencyCodes[i]);
+        return aprs;
+    }
 }
