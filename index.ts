@@ -81,6 +81,7 @@ var db = {
         }
     },
     isBalancingSupply: false,
+    lastTimeExchanged: 0,
     ownerWithdrawableCurrencies: {
         "ETH": {},
         "COMP": {
@@ -763,7 +764,7 @@ async function tryBalanceSupply() {
                 return console.error("Failed to balance supply of", currencyCode, ":", error);
             }
 
-            db.lastTimeBalanced = epoch;
+            db.currencies[currencyCode].lastTimeBalanced = epoch;
         } else console.log("Not balancing supply of", currencyCode, "because no change in balances");
     }
 
