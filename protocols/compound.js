@@ -270,37 +270,49 @@ class CompoundProtocol {
             });
         });
     }
-    predictSupplyRatePerBlockFromComp(currencyCode, supplyWeiDifferenceBN = null, supplyApr = null) {
+    predictSupplyRatePerBlockFromComp(currencyCode, supplyWeiDifferenceBN = null) {
         if (!supplyWeiDifferenceBN)
             supplyWeiDifferenceBN = this.web3.utils.toBN(0);
         return new Promise((resolve, reject) => {
-            https_1.default.get('https://api.compound.finance/api/v2/ctoken', function (data) {
-                return __awaiter(this, void 0, void 0, function* () {
+            https_1.default.get('https://api.compound.finance/api/v2/ctoken', (resp) => {
+                let data = '';
+                // A chunk of data has been recieved
+                resp.on('data', (chunk) => {
+                    data += chunk;
+                });
+                // The whole response has been received
+                resp.on('end', () => __awaiter(this, void 0, void 0, function* () {
+                    var decoded = JSON.parse(data);
+                    if (!decoded || !decoded.data)
+                        reject("Failed to decode cToken list from Compound");
                     // Get cToken USD prices
                     var currencyCodes = ["COMP"];
-                    for (const cToken of data.cToken)
+                    for (const cToken of decoded.cToken)
                         currencyCodes.push(cToken.underlying_symbol);
                     var prices = yield this.getCurrencyUsdRates(currencyCodes);
                     // Get currency APY and total yearly interest
-                    var tokenApy = 0;
-                    var totalYearlyInterestUsd = 0;
-                    for (const cToken of data.cToken) {
-                        if (supplyWeiDifferenceBN.gt(this.web3.utils.toBN(0)))
-                            cToken.exchange_rate.value = supplyApr;
-                        var underlyingSupply = cToken.total_supply.value * cToken.exchange_rate.value;
+                    var currencyTotalSupply = 0;
+                    var currencyYearlyBorrowerInterestUsd = 0;
+                    var totalYearlyBorrowerInterestUsd = 0;
+                    for (const cToken of decoded.cToken) {
+                        var underlyingBorrow = cToken.total_borrow.value * cToken.exchange_rate.value;
+                        var yearlyBorrowerInterestUsd = underlyingBorrow * prices[cToken.underlying_symbol] * cToken.borrow_rate.value;
                         if (cToken.underlying_symbol === currencyCode) {
-                            tokenApy = cToken.supply_rate.value;
+                            currencyTotalSupply = cToken.total_supply.value * cToken.exchange_rate.value;
                             if (supplyWeiDifferenceBN.gt(this.web3.utils.toBN(0)))
-                                underlyingSupply += parseFloat(supplyWeiDifferenceBN.toString());
+                                currencyTotalSupply += parseFloat(supplyWeiDifferenceBN.toString());
+                            currencyYearlyBorrowerInterestUsd = yearlyBorrowerInterestUsd;
                         }
-                        totalYearlyInterestUsd += underlyingSupply * prices[cToken.underlying_symbol] * cToken.supply_rate.value;
+                        totalYearlyBorrowerInterestUsd += yearlyBorrowerInterestUsd;
                     }
                     // Get APY from COMP per block for this currency
-                    var tokenCompPerBlockPerUsd = 0.5 * (tokenApy / totalYearlyInterestUsd);
-                    var tokenUsdFromCompPerBlockPerUsd = tokenCompPerBlockPerUsd * prices["COMP"];
-                    var tokenCompSupplyRatePerBlock = tokenUsdFromCompPerBlockPerUsd * 2102400;
-                    resolve(tokenCompSupplyRatePerBlock * 1e18);
-                });
+                    var compPerBlock = 0.5;
+                    var marketCompPerBlock = compPerBlock * (currencyYearlyBorrowerInterestUsd / totalYearlyBorrowerInterestUsd);
+                    var marketSupplierCompPerBlock = marketCompPerBlock / 2;
+                    var marketSupplierCompPerBlockPerUsd = marketSupplierCompPerBlock / currencyTotalSupply;
+                    var marketSupplierUsdFromCompPerBlockPerUsd = marketSupplierCompPerBlockPerUsd * prices["COMP"];
+                    resolve(marketSupplierUsdFromCompPerBlockPerUsd);
+                }));
             });
         });
     }
@@ -322,15 +334,14 @@ class CompoundProtocol {
             return aprs;
         });
     }
-    predictAprFromComp(currencyCode, supplyWeiDifferenceBN, supplyApr) {
+    predictAprFromComp(currencyCode, supplyWeiDifferenceBN) {
         return __awaiter(this, void 0, void 0, function* () {
-            return this.supplyRatePerBlockToApr(yield this.predictSupplyRatePerBlockFromComp(currencyCode, supplyWeiDifferenceBN, supplyApr));
+            return this.supplyRatePerBlockToApr(yield this.predictSupplyRatePerBlockFromComp(currencyCode, supplyWeiDifferenceBN));
         });
     }
     predictAprWithComp(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN) {
         return __awaiter(this, void 0, void 0, function* () {
-            var supplyApr = yield this.predictApr(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN);
-            return supplyApr + (yield this.predictAprFromComp(currencyCode, supplyWeiDifferenceBN, supplyApr));
+            return (yield this.predictApr(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN)) + (yield this.predictAprFromComp(currencyCode, supplyWeiDifferenceBN));
         });
     }
 }
