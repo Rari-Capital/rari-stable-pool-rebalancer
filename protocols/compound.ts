@@ -186,10 +186,10 @@ export default class CompoundProtocol {
     async claimComp() {
         // TODO: Remove @ts-ignore below
         // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
-        var cErc20Contract = new this.web3.eth.Contract(comptrollerAbi, this.comptrollerContract);
+        var comptrollerContract = new this.web3.eth.Contract(comptrollerAbi, this.comptrollerContract);
         
         // Create claimComp transaction
-        var data = cErc20Contract.methods.claimComp().encodeABI();
+        var data = comptrollerContract.methods.claimComp(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS).encodeABI();
 
         // Build transaction
         var tx = {
@@ -271,7 +271,7 @@ export default class CompoundProtocol {
                 // The whole response has been received
                 resp.on('end', async () => {
                     var decoded = JSON.parse(data);
-                    if (!decoded || !decoded.data) reject("Failed to decode cToken list from Compound");
+                    if (!decoded || !decoded.cToken) reject("Failed to decode cToken list from Compound");
 
                     // Get cToken USD prices
                     var currencyCodes = ["COMP"];
@@ -284,7 +284,7 @@ export default class CompoundProtocol {
                     var totalYearlyBorrowerInterestUsd = 0;
                     
                     for (const cToken of decoded.cToken) {
-                        var underlyingBorrow = cToken.total_borrow.value * cToken.exchange_rate.value;
+                        var underlyingBorrow = cToken.total_borrows.value * cToken.exchange_rate.value;
                         var yearlyBorrowerInterestUsd = underlyingBorrow * prices[cToken.underlying_symbol] * cToken.borrow_rate.value;
 
                         if (cToken.underlying_symbol === currencyCode) {
@@ -302,7 +302,7 @@ export default class CompoundProtocol {
                     var marketSupplierCompPerBlock = marketCompPerBlock / 2;
                     var marketSupplierCompPerBlockPerUsd = marketSupplierCompPerBlock / currencyTotalSupply;
                     var marketSupplierUsdFromCompPerBlockPerUsd = marketSupplierCompPerBlockPerUsd * prices["COMP"];
-                    resolve(marketSupplierUsdFromCompPerBlockPerUsd);
+                    resolve(marketSupplierUsdFromCompPerBlockPerUsd * 1e18);
                 });
             });
         });
@@ -318,7 +318,7 @@ export default class CompoundProtocol {
 
     async getAprsWithComp(currencyCodes) {
         var aprs = {};
-        for (var i = 0; i < currencyCodes.length; i++) aprs[currencyCodes[i]] = await this.getAprFromComp(currencyCodes[i]);
+        for (var i = 0; i < currencyCodes.length; i++) aprs[currencyCodes[i]] = await this.getAprWithComp(currencyCodes[i]);
         return aprs;
     }
 
