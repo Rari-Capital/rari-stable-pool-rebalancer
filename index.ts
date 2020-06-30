@@ -104,12 +104,16 @@ async function onLoad() {
     setInterval(function() { updateCurrencyUsdRates(); }, (process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS ? parseFloat(process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS) : 60) * 1000);
 
     // Start claiming interest fees regularly
-    await tryDepositInterestFees();
-    setInterval(function() { tryDepositInterestFees(); }, (process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS ? parseFloat(process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS) : 86400) * 1000);
+    if (process.env.CLAIM_INTEREST_FEES_REGULARLY) {
+        await tryDepositInterestFees();
+        setInterval(function() { tryDepositInterestFees(); }, (process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS ? parseFloat(process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS) : 86400) * 1000);
+    }
 
     // Start withdrawing ETH and COMP regularly
-    await tryOwnerWithdrawAllCurrencies();
-    setInterval(function() { tryOwnerWithdrawAllCurrencies(); }, (process.env.OWNER_WITHDRAW_INTERVAL_SECONDS ? parseFloat(process.env.OWNER_WITHDRAW_INTERVAL_SECONDS) : 86400) * 1000);
+    if (process.env.OWNER_WITHDRAW_REGULARLY) {
+        await tryOwnerWithdrawAllCurrencies();
+        setInterval(function() { tryOwnerWithdrawAllCurrencies(); }, (process.env.OWNER_WITHDRAW_INTERVAL_SECONDS ? parseFloat(process.env.OWNER_WITHDRAW_INTERVAL_SECONDS) : 86400) * 1000);
+    }
 
     // Set max token allowances to pools and 0x
     await setMaxTokenAllowances();
@@ -320,14 +324,36 @@ async function getAllAprs() {
 
 /* TOKEN ALLOWANCES */
 
-async function setMaxTokenAllowances(unset = false) {
-    for (const poolName of Object.keys(db.pools))
-        for (const currencyCode of Object.keys(db.pools[poolName].currencies))
-            await setMaxTokenAllowanceToPool(poolName, currencyCode, unset);
+async function setMaxTokenAllowances() {
+    for (const poolName of Object.keys(db.pools)) for (const currencyCode of Object.keys(db.pools[poolName].currencies)) {
+        try {
+            if ((await getTokenAllowanceToPoolBN(poolName, currencyCode)).lt(web3.utils.toBN(2).pow(web3.utils.toBN(255)).sub(web3.utils.toBN(1))))
+                await setMaxTokenAllowanceToPool(poolName, currencyCode);
+        } catch (error) {
+            console.error(error);
+        }
+    }
 
-    for (const currencyCode of Object.keys(db.currencies))
-        if (currencyCode != "ETH")
-            await setMaxTokenAllowanceTo0x(currencyCode, unset);
+    for (const currencyCode of Object.keys(db.currencies)) if (currencyCode != "ETH") {
+        try {
+            if ((await getTokenAllowanceTo0xBN(currencyCode)).lt(web3.utils.toBN(2).pow(web3.utils.toBN(255)).sub(web3.utils.toBN(1))))
+                await setMaxTokenAllowanceTo0x(currencyCode);
+        } catch (error) {
+            console.error(error);
+        }
+    }
+}
+
+async function getTokenAllowanceToPoolBN(poolName, currencyCode) {
+    // TODO: Remove @ts-ignore below
+    // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
+    var erc20Contract = new web3.eth.Contract(erc20Abi, db.currencies[currencyCode].tokenAddress);
+
+    try {
+        return web3.utils.toBN(await erc20Contract.methods.allowance(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS, poolName == "Compound" ? compoundProtocol.cErc20Contracts[currencyCode] : dydxProtocol.soloMarginContract.options.address).call());
+    } catch (error) {
+        throw "Error when retreiving " + currencyCode + " allowance of FundManager to " + poolName + ": " + error;
+    }
 }
 
 async function setMaxTokenAllowanceToPool(poolName, currencyCode, unset = false) {
@@ -336,11 +362,22 @@ async function setMaxTokenAllowanceToPool(poolName, currencyCode, unset = false)
     try {
         var txid = await approveFundsToPool(poolName, currencyCode, unset ? web3.utils.toBN(0) : web3.utils.toBN(2).pow(web3.utils.toBN(256)).sub(web3.utils.toBN(1)));
     } catch (error) {
-        console.error("Failed to set " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on", poolName, ":", error);
-        return;
+        throw "Failed to set " + (unset ? "zero" : "max") + " token allowance for " + currencyCode + " on " + poolName + ": " + error;
     }
     
     console.log((unset ? "Zero" : "Max") + " token allowance set successfully for", currencyCode, "on", poolName, ":", txid);
+}
+
+async function getTokenAllowanceTo0xBN(currencyCode) {
+    // TODO: Remove @ts-ignore below
+    // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
+    var erc20Contract = new web3.eth.Contract(erc20Abi, db.currencies[currencyCode].tokenAddress);
+
+    try {
+        return web3.utils.toBN(await erc20Contract.methods.allowance(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS, "0x95E6F48254609A6ee006F7D493c8e5fB97094ceF").call());
+    } catch (error) {
+        throw "Error when retreiving " + currencyCode + " allowance of FundManager to 0x: " + error;
+    }
 }
 
 async function setMaxTokenAllowanceTo0x(currencyCode, unset = false) {
@@ -349,8 +386,7 @@ async function setMaxTokenAllowanceTo0x(currencyCode, unset = false) {
     try {
         var txid = await approveFundsTo0x(currencyCode, unset ? web3.utils.toBN(0) : web3.utils.toBN(2).pow(web3.utils.toBN(256)).sub(web3.utils.toBN(1)));
     } catch (error) {
-        console.error("Failed to set " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on 0x:", error);
-        return;
+        throw "Failed to set " + (unset ? "zero" : "max") + " token allowance for " + currencyCode + " on 0x: " + error;
     }
     
     console.log((unset ? "Zero" : "Max") + " token allowance set successfully for", currencyCode, "on 0x:", txid);

@@ -24,7 +24,9 @@ module.exports = {
       AUTOMATIC_TOKEN_EXCHANGE_ENABLED: true,
       AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_EXCHANGE: 1.0, // The maximum amount of slippage including taker fees (from 0 to 1) per addition of APR (from 0 to 1) including COMP (at current trade price) per the number of years since the last exchange from this input currency to this output currency; in theory, max slippage per APR increase per year since last rebalancing is 1 to break even; formula: maximum slippage including taker fees (from 0 to 1) = X * (addition of APR (from 0 to 1) including COMP (at current trade price)) * (years since the last exchange from this input currency to this output currency) // TODO: Include 0x protocol fees and miner fees in slippage
       UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS: 30 * 60,
+      CLAIM_INTEREST_FEES_REGULARLY: true,
       CLAIM_INTEREST_FEES_INTERVAL_SECONDS: 86400,
+      OWNER_WITHDRAW_REGULARLY: true,
       OWNER_WITHDRAW_INTERVAL_SECONDS: 86400
     },
     env_production: {
@@ -41,7 +43,9 @@ module.exports = {
       AUTOMATIC_TOKEN_EXCHANGE_ENABLED: true,
       AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_EXCHANGE: 1.0, // The maximum amount of slippage including taker fees (from 0 to 1) per addition of APR (from 0 to 1) including COMP (at current trade price) per the number of years since the last exchange from this input currency to this output currency; in theory, max slippage per APR increase per year since last rebalancing is 1 to break even; formula: maximum slippage including taker fees (from 0 to 1) = X * (addition of APR (from 0 to 1) including COMP (at current trade price)) * (years since the last exchange from this input currency to this output currency) // TODO: Include 0x protocol fees and miner fees in slippage
       UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS: 30 * 60,
+      CLAIM_INTEREST_FEES_REGULARLY: false,
       CLAIM_INTEREST_FEES_INTERVAL_SECONDS: 86400,
+      OWNER_WITHDRAW_REGULARLY: false,
       OWNER_WITHDRAW_INTERVAL_SECONDS: 86400
     }
   }]
