@@ -104,13 +104,13 @@ async function onLoad() {
     setInterval(function() { updateCurrencyUsdRates(); }, (process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS ? parseFloat(process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS) : 60) * 1000);
 
     // Start claiming interest fees regularly
-    if (process.env.CLAIM_INTEREST_FEES_REGULARLY) {
+    if (parseInt(process.env.CLAIM_INTEREST_FEES_REGULARLY)) {
         await tryDepositInterestFees();
         setInterval(function() { tryDepositInterestFees(); }, (process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS ? parseFloat(process.env.CLAIM_INTEREST_FEES_INTERVAL_SECONDS) : 86400) * 1000);
     }
 
     // Start withdrawing ETH and COMP regularly
-    if (process.env.OWNER_WITHDRAW_REGULARLY) {
+    if (parseInt(process.env.OWNER_WITHDRAW_REGULARLY)) {
         await tryOwnerWithdrawAllCurrencies();
         setInterval(function() { tryOwnerWithdrawAllCurrencies(); }, (process.env.OWNER_WITHDRAW_INTERVAL_SECONDS ? parseFloat(process.env.OWNER_WITHDRAW_INTERVAL_SECONDS) : 86400) * 1000);
     }
@@ -523,7 +523,7 @@ async function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN
         var minApr = pools[i + 1] ? pools[i + 1].supplyApr : 0;
         var maxBalanceDifferenceBN = totalBN.sub(db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN);
 
-        if (!process.env.PROPORTIONAL_SUPPLY_BALANCING_ENABLED || minApr <= 0) {
+        if (!parseInt(process.env.PROPORTIONAL_SUPPLY_BALANCING_ENABLED) || minApr <= 0) {
             // Set balance difference to maximum since there are no other APRs > 0
             pools[i].balanceDifferenceBN = maxBalanceDifferenceBN;
             pools[i].balanceBN = db.pools[pools[i].poolName].currencies[currencyCode].poolBalanceBN.add(pools[i].balanceDifferenceBN);
@@ -641,7 +641,7 @@ async function tryBalanceSupply() {
     db.isBalancingSupply = true;
     console.log("Trying to balance supply");
 
-    if (process.env.AUTOMATIC_TOKEN_EXCHANGE_ENABLED) {
+    if (parseInt(process.env.AUTOMATIC_TOKEN_EXCHANGE_ENABLED)) {
         // Get best currency and pool for potential currency exchange
         // TODO: Implement proportional currency rebalancing using APR predictions
         try {
