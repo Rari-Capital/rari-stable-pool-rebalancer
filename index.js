@@ -682,7 +682,7 @@ function tryBalanceSupply() {
                         var minMarginalOutputAmountBN = web3.utils.toBN(Math.trunc(maxMarginalOutputAmount * (1 - (parseFloat(process.env.AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_EXCHANGE) * (bestApr - bestAprForThisCurrency) * (secondsSinceLastExchange / 86400 / 365))) * (Math.pow(10, db.currencies[bestCurrencyCode].decimals))));
                         // Get estimated filled input amount from 0x swap API
                         try {
-                            var [orders, estimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
+                            var [orders, estimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
                         }
                         catch (error) {
                             db.isBalancingSupply = false;
@@ -710,20 +710,20 @@ function tryBalanceSupply() {
                         }
                         // Exchange tokens!
                         try {
-                            var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee));
+                            var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee), web3.utils.toBN(gasPrice));
                         }
                         catch (error) {
                             // Retry up to 2 more times
                             for (var i = 0; i < 3; i++) {
                                 try {
-                                    var [orders, newEstimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, estimatedInputAmountBN, minMarginalOutputAmountBN);
+                                    var [orders, newEstimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, estimatedInputAmountBN, minMarginalOutputAmountBN);
                                 }
                                 catch (error) {
                                     db.isBalancingSupply = false;
                                     return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
                                 }
                                 try {
-                                    var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee));
+                                    var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee), web3.utils.toBN(gasPrice));
                                     break;
                                 }
                                 catch (error) {
@@ -1042,7 +1042,7 @@ function approveFundsTo0x(currencyCode, amountBN) {
         return sentTx;
     });
 }
-function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFillAmountBN, orders, protocolFeeBN) {
+function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFillAmountBN, orders, protocolFeeBN, gasPriceBN) {
     return __awaiter(this, void 0, void 0, function* () {
         // Build array of orders and signatures
         var signatures = [];
@@ -1073,6 +1073,7 @@ function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFillAmou
             to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
             value: protocolFeeBN,
             data: data,
+            gasPrice: gasPriceBN,
             nonce: yield web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
         };
         if (process.env.NODE_ENV !== "production")

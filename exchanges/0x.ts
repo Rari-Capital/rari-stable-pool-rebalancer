@@ -36,7 +36,7 @@ export default class ZeroExExchange {
         });
     }
 
-    getSwapOrders(inputTokenAddress, inputTokenDecimals, outputTokenAddress, maxInputAmountBN, minMarginalOutputAmountBN): Promise<[any[], any, any, any]> {
+    getSwapOrders(inputTokenAddress, inputTokenDecimals, outputTokenAddress, maxInputAmountBN, minMarginalOutputAmountBN): Promise<[any[], any, any, any, any]> {
         return new Promise((resolve, reject) => {
             https.get('https://api.0x.org/swap/v0/quote?sellToken=' + inputTokenAddress + '&buyToken=' + outputTokenAddress + '&sellAmount=' + maxInputAmountBN.toString(), (resp) => {
                 let data = '';
@@ -90,7 +90,7 @@ export default class ZeroExExchange {
                     }
 
                     if (takerAssetFilledAmountBN.isZero()) reject("No orders satisfying minMarginalOutputAmountBN found on 0x swap API");
-                    resolve([orders, inputFilledAmountBN, decoded.protocolFee, takerAssetFilledAmountBN]);
+                    resolve([orders, inputFilledAmountBN, decoded.protocolFee, takerAssetFilledAmountBN, decoded.gasPrice]);
                 });
             }).on("error", (err) => {
                 reject("Error requesting quote from 0x swap API: " + err.message);

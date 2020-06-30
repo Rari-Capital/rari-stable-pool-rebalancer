@@ -81,7 +81,7 @@ class ZeroExExchange {
                     }
                     if (takerAssetFilledAmountBN.isZero())
                         reject("No orders satisfying minMarginalOutputAmountBN found on 0x swap API");
-                    resolve([orders, inputFilledAmountBN, decoded.protocolFee, takerAssetFilledAmountBN]);
+                    resolve([orders, inputFilledAmountBN, decoded.protocolFee, takerAssetFilledAmountBN, decoded.gasPrice]);
                 });
             }).on("error", (err) => {
                 reject("Error requesting quote from 0x swap API: " + err.message);

@@ -684,7 +684,7 @@ async function tryBalanceSupply() {
 
                 // Get estimated filled input amount from 0x swap API
                 try {
-                    var [orders, estimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN] = await zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
+                    var [orders, estimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = await zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
                 } catch (error) {
                     db.isBalancingSupply = false;
                     return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
@@ -714,19 +714,19 @@ async function tryBalanceSupply() {
 
                 // Exchange tokens!
                 try {
-                    var txid = await exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee));
+                    var txid = await exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee), web3.utils.toBN(gasPrice));
                 } catch (error) {
                     // Retry up to 2 more times
                     for (var i = 0; i < 3; i++) {
                         try {
-                            var [orders, newEstimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN] = await zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, estimatedInputAmountBN, minMarginalOutputAmountBN);
+                            var [orders, newEstimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = await zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, estimatedInputAmountBN, minMarginalOutputAmountBN);
                         } catch (error) {
                             db.isBalancingSupply = false;
                             return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
                         }
 
                         try {
-                            var txid = await exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee));
+                            var txid = await exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee), web3.utils.toBN(gasPrice));
                             break;
                         } catch (error) {
                             // Stop trying on 3rd error
@@ -1051,7 +1051,7 @@ async function approveFundsTo0x(currencyCode, amountBN) {
     return sentTx;
 }
 
-async function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFillAmountBN, orders, protocolFeeBN) {
+async function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFillAmountBN, orders, protocolFeeBN, gasPriceBN) {
     // Build array of orders and signatures
     var signatures = [];
 
@@ -1085,6 +1085,7 @@ async function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFi
         to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
         value: protocolFeeBN,
         data: data,
+        gasPrice: gasPriceBN,
         nonce: await web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
     };
 
