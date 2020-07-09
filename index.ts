@@ -973,7 +973,7 @@ async function addFunds(poolName, currencyCode, amountBN) {
 
 async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
     // Create withdrawFromPool transaction
-    var data = fundManagerContract.methods.withdrawFromPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
+    var data = (removeAll ? fundManagerContract.methods.withdrawAllFromPool(poolName == "Compound" ? 1 : 0, currencyCode) : fundManagerContract.methods.withdrawFromPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN)).encodeABI();
 
     // Build transaction
     var tx = {
@@ -984,30 +984,30 @@ async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) 
         nonce: await web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
     };
 
-    if (process.env.NODE_ENV !== "production") console.log("Removing", amountBN.toString(), currencyCode, "funds from", poolName, ":", tx);
+    if (process.env.NODE_ENV !== "production") console.log("Removing", removeAll ? "all of" : amountBN.toString(), currencyCode, "from", poolName, ":", tx);
 
     // Estimate gas for transaction
     try {
         tx["gas"] = await web3.eth.estimateGas(tx);
     } catch (error) {
-        throw "Failed to estimate gas before signing and sending transaction for withdrawFromPool of " + currencyCode + " from " + poolName + ": " + error;
+        throw "Failed to estimate gas before signing and sending transaction for " + (removeAll ? "withdrawAllFromPool" : "withdrawFromPool") + " of " + currencyCode + " from " + poolName + ": " + error;
     }
     
     // Sign transaction
     try {
         var signedTx = await web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
     } catch (error) {
-        throw "Error signing transaction for withdrawFromPool of " + currencyCode + " from " + poolName + ": " + error;
+        throw "Error signing transaction for " + (removeAll ? "withdrawAllFromPool" : "withdrawFromPool") + " of " + currencyCode + " from " + poolName + ": " + error;
     }
 
     // Send transaction
     try {
         var sentTx = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
     } catch (error) {
-        throw "Error sending transaction for withdrawFromPool of " + currencyCode + " from " + poolName + ": " + error;
+        throw "Error sending transaction for " + (removeAll ? "withdrawAllFromPool" : "withdrawFromPool") + " of " + currencyCode + " from " + poolName + ": " + error;
     }
     
-    console.log("Successfully removed", currencyCode, "funds from", poolName, ":", sentTx);
+    console.log("Successfully removed", removeAll ? "all of" : amountBN.toString(), currencyCode, "from", poolName, ":", sentTx);
     return sentTx;
 }
 
