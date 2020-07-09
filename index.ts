@@ -243,19 +243,24 @@ async function ownerWithdrawCurrency(currencyCode) {
 /* SETTING ACCEPTED CURRENCIES */
 
 async function setAcceptedCurrencies() {
-    // Get best currency and pool for potential currency exchange
+    // Get best currencies and pools for potential currency exchange
     try {
-        var [bestCurrencyCode, bestPoolName, bestApr] = await getBestCurrencyAndPool();
+        var pools = await getBestCurrenciesAndPools();
     } catch (error) {
-        return console.error("Failed to get best currency and pool when trying to set accepted currencies:", error);
+        return console.error("Failed to get best currencies and pools when trying to set accepted currencies:", error);
     }
+
+    var currenciesChecked = [];
     
-    for (const currencyCode of Object.keys(db.currencies)) if (currencyCode !== "ETH") {
-        var accepted = await fundManagerContract.methods.isCurrencyAccepted(currencyCode).call();
+    for (var i = 0; i < pools.length; i++) {
+        if (currenciesChecked.indexOf(pools[i].currencyCode) >= 0) continue;
+        currenciesChecked.push(pools[i].currencyCode);
+        var accepted = await fundManagerContract.methods.isCurrencyAccepted(pools[i].currencyCode).call();
+        var shouldBeAccepted = i == 0 || pools[i].supplyApr >= pools[0].supplyApr * 0.9;
 
         try {
-            if (!accepted && currencyCode === bestCurrencyCode) await setAcceptedCurrency(currencyCode, true);
-            else if (accepted && currencyCode !== bestCurrencyCode) await setAcceptedCurrency(currencyCode, false);
+            if (!accepted && shouldBeAccepted) await setAcceptedCurrency(pools[i].currencyCode, true);
+            else if (accepted && !shouldBeAccepted) await setAcceptedCurrency(pools[i].currencyCode, false);
         } catch (error) {
             return console.error(error);
         }
@@ -571,6 +576,16 @@ async function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN
 
     if (process.env.NODE_ENV !== "production") console.log("Ideal balances of", currencyCode, ":", JSON.stringify(pools, null, 2));
     return pools;
+}
+
+async function getBestCurrenciesAndPools() {
+    var pools = [];
+
+    for (const poolName of Object.keys(db.pools))
+        for (const currencyCode of Object.keys(db.pools[poolName].currencies))
+            pools.push({ currencyCode, poolName, supplyApr: db.pools[poolName].currencies[currencyCode].supplyApr });
+
+    return pools.sort((a, b) => (a.supplyApr < b.supplyApr) ? 1 : -1);
 }
 
 async function getBestCurrencyAndPool() {
