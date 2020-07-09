@@ -270,7 +270,7 @@ class CompoundProtocol {
             });
         });
     }
-    predictSupplyRatePerBlockFromComp(currencyCode, supplyWeiDifferenceBN = null) {
+    predictSupplyRatePerBlockFromComp(currencyCode, supplyWeiDifferenceBN = null, currencyDecimals = 0) {
         if (!supplyWeiDifferenceBN)
             supplyWeiDifferenceBN = this.web3.utils.toBN(0);
         return new Promise((resolve, reject) => {
@@ -291,25 +291,25 @@ class CompoundProtocol {
                         currencyCodes.push(cToken.underlying_symbol);
                     var prices = yield this.getCurrencyUsdRates(currencyCodes);
                     // Get currency APY and total yearly interest
-                    var currencyTotalSupply = 0;
-                    var currencyYearlyBorrowerInterestUsd = 0;
-                    var totalYearlyBorrowerInterestUsd = 0;
+                    var currencyUnderlyingSupply = 0;
+                    var currencyBorrowUsd = 0;
+                    var totalBorrowUsd = 0;
                     for (const cToken of decoded.cToken) {
                         var underlyingBorrow = cToken.total_borrows.value * cToken.exchange_rate.value;
-                        var yearlyBorrowerInterestUsd = underlyingBorrow * prices[cToken.underlying_symbol] * cToken.borrow_rate.value;
+                        var borrowUsd = underlyingBorrow * prices[cToken.underlying_symbol];
                         if (cToken.underlying_symbol === currencyCode) {
-                            currencyTotalSupply = cToken.total_supply.value * cToken.exchange_rate.value;
+                            currencyUnderlyingSupply = cToken.total_supply.value * cToken.exchange_rate.value;
                             if (supplyWeiDifferenceBN.gt(this.web3.utils.toBN(0)))
-                                currencyTotalSupply += parseFloat(supplyWeiDifferenceBN.toString());
-                            currencyYearlyBorrowerInterestUsd = yearlyBorrowerInterestUsd;
+                                currencyUnderlyingSupply += parseFloat(supplyWeiDifferenceBN.toString()) / (Math.pow(10, currencyDecimals));
+                            currencyBorrowUsd = borrowUsd;
                         }
-                        totalYearlyBorrowerInterestUsd += yearlyBorrowerInterestUsd;
+                        totalBorrowUsd += borrowUsd;
                     }
                     // Get APY from COMP per block for this currency
                     var compPerBlock = 0.5;
-                    var marketCompPerBlock = compPerBlock * (currencyYearlyBorrowerInterestUsd / totalYearlyBorrowerInterestUsd);
+                    var marketCompPerBlock = compPerBlock * (currencyBorrowUsd / totalBorrowUsd);
                     var marketSupplierCompPerBlock = marketCompPerBlock / 2;
-                    var marketSupplierCompPerBlockPerUsd = marketSupplierCompPerBlock / currencyTotalSupply;
+                    var marketSupplierCompPerBlockPerUsd = marketSupplierCompPerBlock / currencyUnderlyingSupply; // Assumes that the value of currencyCode is $1
                     var marketSupplierUsdFromCompPerBlockPerUsd = marketSupplierCompPerBlockPerUsd * prices["COMP"];
                     resolve(marketSupplierUsdFromCompPerBlockPerUsd * 1e18);
                 }));
@@ -334,14 +334,14 @@ class CompoundProtocol {
             return aprs;
         });
     }
-    predictAprFromComp(currencyCode, supplyWeiDifferenceBN) {
+    predictAprFromComp(currencyCode, supplyWeiDifferenceBN, currencyDecimals) {
         return __awaiter(this, void 0, void 0, function* () {
-            return this.supplyRatePerBlockToApr(yield this.predictSupplyRatePerBlockFromComp(currencyCode, supplyWeiDifferenceBN));
+            return this.supplyRatePerBlockToApr(yield this.predictSupplyRatePerBlockFromComp(currencyCode, supplyWeiDifferenceBN, currencyDecimals));
         });
     }
-    predictAprWithComp(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN) {
+    predictAprWithComp(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN, currencyDecimals) {
         return __awaiter(this, void 0, void 0, function* () {
-            return (yield this.predictApr(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN)) + (yield this.predictAprFromComp(currencyCode, supplyWeiDifferenceBN));
+            return (yield this.predictApr(currencyCode, underlyingTokenAddress, supplyWeiDifferenceBN)) + (yield this.predictAprFromComp(currencyCode, supplyWeiDifferenceBN, currencyDecimals));
         });
     }
 }

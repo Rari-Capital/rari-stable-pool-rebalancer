@@ -248,26 +248,30 @@ function ownerWithdrawCurrency(currencyCode) {
 /* SETTING ACCEPTED CURRENCIES */
 function setAcceptedCurrencies() {
     return __awaiter(this, void 0, void 0, function* () {
-        // Get best currency and pool for potential currency exchange
+        // Get best currencies and pools for potential currency exchange
         try {
-            var [bestCurrencyCode, bestPoolName, bestApr] = yield getBestCurrencyAndPool();
+            var pools = yield getBestCurrenciesAndPools();
         }
         catch (error) {
-            return console.error("Failed to get best currency and pool when trying to set accepted currencies:", error);
+            return console.error("Failed to get best currencies and pools when trying to set accepted currencies:", error);
         }
-        for (const currencyCode of Object.keys(db.currencies))
-            if (currencyCode !== "ETH") {
-                var accepted = yield fundManagerContract.methods.isCurrencyAccepted(currencyCode).call();
-                try {
-                    if (!accepted && currencyCode === bestCurrencyCode)
-                        yield setAcceptedCurrency(currencyCode, true);
-                    else if (accepted && currencyCode !== bestCurrencyCode)
-                        yield setAcceptedCurrency(currencyCode, false);
-                }
-                catch (error) {
-                    return console.error(error);
-                }
+        var currenciesChecked = [];
+        for (var i = 0; i < pools.length; i++) {
+            if (currenciesChecked.indexOf(pools[i].currencyCode) >= 0)
+                continue;
+            currenciesChecked.push(pools[i].currencyCode);
+            var accepted = yield fundManagerContract.methods.isCurrencyAccepted(pools[i].currencyCode).call();
+            var shouldBeAccepted = i == 0 || pools[i].supplyApr >= pools[0].supplyApr * 0.9;
+            try {
+                if (!accepted && shouldBeAccepted)
+                    yield setAcceptedCurrency(pools[i].currencyCode, true);
+                else if (accepted && !shouldBeAccepted)
+                    yield setAcceptedCurrency(pools[i].currencyCode, false);
             }
+            catch (error) {
+                return console.error(error);
+            }
+        }
     });
 }
 function setAcceptedCurrency(currencyCode, accepted) {
@@ -441,7 +445,7 @@ function predictApr(currencyCode, poolName, balanceDifferenceBN) {
         if (poolName === "dYdX")
             return yield dydxProtocol.predictApr(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
         else if (poolName == "Compound")
-            return yield compoundProtocol.predictAprWithComp(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
+            return yield compoundProtocol.predictAprWithComp(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN, db.currencies[currencyCode].decimals);
         else
             throw "Failed to predict APR for unrecognized pool: " + poolName;
     });
@@ -579,6 +583,15 @@ function getIdealBalancesByCurrency(currencyCode, totalBalanceDifferenceBN = web
         if (process.env.NODE_ENV !== "production")
             console.log("Ideal balances of", currencyCode, ":", JSON.stringify(pools, null, 2));
         return pools;
+    });
+}
+function getBestCurrenciesAndPools() {
+    return __awaiter(this, void 0, void 0, function* () {
+        var pools = [];
+        for (const poolName of Object.keys(db.pools))
+            for (const currencyCode of Object.keys(db.pools[poolName].currencies))
+                pools.push({ currencyCode, poolName, supplyApr: db.pools[poolName].currencies[currencyCode].supplyApr });
+        return pools.sort((a, b) => (a.supplyApr < b.supplyApr) ? 1 : -1);
     });
 }
 function getBestCurrencyAndPool() {
@@ -967,7 +980,7 @@ function addFunds(poolName, currencyCode, amountBN) {
 function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
     return __awaiter(this, void 0, void 0, function* () {
         // Create withdrawFromPool transaction
-        var data = fundManagerContract.methods.withdrawFromPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
+        var data = (removeAll ? fundManagerContract.methods.withdrawAllFromPool(poolName == "Compound" ? 1 : 0, currencyCode) : fundManagerContract.methods.withdrawFromPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN)).encodeABI();
         // Build transaction
         var tx = {
             from: process.env.ETHEREUM_ADMIN_ACCOUNT,
@@ -977,29 +990,29 @@ function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
             nonce: yield web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
         };
         if (process.env.NODE_ENV !== "production")
-            console.log("Removing", amountBN.toString(), currencyCode, "funds from", poolName, ":", tx);
+            console.log("Removing", removeAll ? "all of" : amountBN.toString(), currencyCode, "from", poolName, ":", tx);
         // Estimate gas for transaction
         try {
             tx["gas"] = yield web3.eth.estimateGas(tx);
         }
         catch (error) {
-            throw "Failed to estimate gas before signing and sending transaction for withdrawFromPool of " + currencyCode + " from " + poolName + ": " + error;
+            throw "Failed to estimate gas before signing and sending transaction for " + (removeAll ? "withdrawAllFromPool" : "withdrawFromPool") + " of " + currencyCode + " from " + poolName + ": " + error;
         }
         // Sign transaction
         try {
             var signedTx = yield web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
         }
         catch (error) {
-            throw "Error signing transaction for withdrawFromPool of " + currencyCode + " from " + poolName + ": " + error;
+            throw "Error signing transaction for " + (removeAll ? "withdrawAllFromPool" : "withdrawFromPool") + " of " + currencyCode + " from " + poolName + ": " + error;
         }
         // Send transaction
         try {
             var sentTx = yield web3.eth.sendSignedTransaction(signedTx.rawTransaction);
         }
         catch (error) {
-            throw "Error sending transaction for withdrawFromPool of " + currencyCode + " from " + poolName + ": " + error;
+            throw "Error sending transaction for " + (removeAll ? "withdrawAllFromPool" : "withdrawFromPool") + " of " + currencyCode + " from " + poolName + ": " + error;
         }
-        console.log("Successfully removed", currencyCode, "funds from", poolName, ":", sentTx);
+        console.log("Successfully removed", removeAll ? "all of" : amountBN.toString(), currencyCode, "from", poolName, ":", sentTx);
         return sentTx;
     });
 }

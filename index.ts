@@ -432,7 +432,7 @@ async function updateCurrencyUsdRates() {
 
 async function predictApr(currencyCode, poolName, balanceDifferenceBN) {
     if (poolName === "dYdX") return await dydxProtocol.predictApr(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
-    else if (poolName == "Compound") return await compoundProtocol.predictAprWithComp(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
+    else if (poolName == "Compound") return await compoundProtocol.predictAprWithComp(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN, db.currencies[currencyCode].decimals);
     else throw "Failed to predict APR for unrecognized pool: " + poolName;
 }
 
