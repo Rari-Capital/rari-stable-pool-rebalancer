@@ -29,25 +29,29 @@ var db = {
     currencies: {
         "ETH": {
             decimals: 18,
-            usdRate: 0
+            usdRate: 0,
+            coinGeckoId: "ethereum"
         },
         "DAI": {
             fundManagerContractBalanceBN: web3.utils.toBN(0),
             decimals: 18,
             tokenAddress: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
-            usdRate: 0
+            usdRate: 0,
+            coinGeckoId: "dai"
         },
         "USDC": {
             fundManagerContractBalanceBN: web3.utils.toBN(0),
             decimals: 6,
             tokenAddress: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-            usdRate: 0
+            usdRate: 0,
+            coinGeckoId: "usd-coin"
         },
         "USDT": {
             fundManagerContractBalanceBN: web3.utils.toBN(0),
             decimals: 6,
             tokenAddress: "0xdac17f958d2ee523a2206206994597c13d831ec7",
-            usdRate: 0
+            usdRate: 0,
+            coinGeckoId: "tether"
         }
     },
     pools: {
@@ -400,13 +404,10 @@ async function setMaxTokenAllowanceTo0x(currencyCode, unset = false) {
 /* CURRENCY USD RATE UPDATING */
 
 async function updateCurrencyUsdRates() {
-    var currencyCodes = Object.keys(db.currencies);
+    var currencyCodesByCoinGeckoIds = {};
+    for (const currencyCode of Object.keys(db.currencies)) currencyCodesByCoinGeckoIds[db.currencies[currencyCode].coinGeckoId] = currencyCode;
     
-    https.get('https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=' + currencyCodes.join(','), {
-        headers: {
-            'X-CMC_PRO_API_KEY': process.env.CMC_PRO_API_KEY
-        }
-    }, (resp) => {
+    https.get('https://api.coingecko.com/api/v3/simple/price?vs_currencies=usd&ids=' + Object.keys(currencyCodesByCoinGeckoIds).join('%2C'), (resp) => {
         let data = '';
 
         // A chunk of data has been recieved
@@ -417,14 +418,11 @@ async function updateCurrencyUsdRates() {
         // The whole response has been received
         resp.on('end', () => {
             var decoded = JSON.parse(data);
-            if (!decoded || !decoded.data) return console.error("Failed to decode USD exchange rates from CoinMarketCap");
-
-            for (const key of Object.keys(decoded.data)) {
-                db.currencies[key].usdRate = decoded.data[key].quote.USD.price;
-            }
+            if (!decoded) return console.error("Failed to decode USD exchange rates from CoinGecko");
+            for (const key of Object.keys(decoded)) db.currencies[currencyCodesByCoinGeckoIds[key]].usdRate = decoded[key].usd;
         });
     }).on("error", (err) => {
-        console.error("Error requesting currency rates from CoinMarketCap:", err.message);
+        console.error("Error requesting currency rates from CoinGecko:", err.message);
     });
 }
 

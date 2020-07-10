@@ -36,25 +36,29 @@ var db = {
     currencies: {
         "ETH": {
             decimals: 18,
-            usdRate: 0
+            usdRate: 0,
+            coinGeckoId: "ethereum"
         },
         "DAI": {
             fundManagerContractBalanceBN: web3.utils.toBN(0),
             decimals: 18,
             tokenAddress: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
-            usdRate: 0
+            usdRate: 0,
+            coinGeckoId: "dai"
         },
         "USDC": {
             fundManagerContractBalanceBN: web3.utils.toBN(0),
             decimals: 6,
             tokenAddress: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-            usdRate: 0
+            usdRate: 0,
+            coinGeckoId: "usd-coin"
         },
         "USDT": {
             fundManagerContractBalanceBN: web3.utils.toBN(0),
             decimals: 6,
             tokenAddress: "0xdac17f958d2ee523a2206206994597c13d831ec7",
-            usdRate: 0
+            usdRate: 0,
+            coinGeckoId: "tether"
         }
     },
     pools: {
@@ -414,12 +418,10 @@ function setMaxTokenAllowanceTo0x(currencyCode, unset = false) {
 /* CURRENCY USD RATE UPDATING */
 function updateCurrencyUsdRates() {
     return __awaiter(this, void 0, void 0, function* () {
-        var currencyCodes = Object.keys(db.currencies);
-        https_1.default.get('https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=' + currencyCodes.join(','), {
-            headers: {
-                'X-CMC_PRO_API_KEY': process.env.CMC_PRO_API_KEY
-            }
-        }, (resp) => {
+        var currencyCodesByCoinGeckoIds = {};
+        for (const currencyCode of Object.keys(db.currencies))
+            currencyCodesByCoinGeckoIds[db.currencies[currencyCode].coinGeckoId] = currencyCode;
+        https_1.default.get('https://api.coingecko.com/api/v3/simple/price?vs_currencies=usd&ids=' + Object.keys(currencyCodesByCoinGeckoIds).join('%2C'), (resp) => {
             let data = '';
             // A chunk of data has been recieved
             resp.on('data', (chunk) => {
@@ -428,14 +430,13 @@ function updateCurrencyUsdRates() {
             // The whole response has been received
             resp.on('end', () => {
                 var decoded = JSON.parse(data);
-                if (!decoded || !decoded.data)
-                    return console.error("Failed to decode USD exchange rates from CoinMarketCap");
-                for (const key of Object.keys(decoded.data)) {
-                    db.currencies[key].usdRate = decoded.data[key].quote.USD.price;
-                }
+                if (!decoded)
+                    return console.error("Failed to decode USD exchange rates from CoinGecko");
+                for (const key of Object.keys(decoded))
+                    db.currencies[currencyCodesByCoinGeckoIds[key]].usdRate = decoded[key].usd;
             });
         }).on("error", (err) => {
-            console.error("Error requesting currency rates from CoinMarketCap:", err.message);
+            console.error("Error requesting currency rates from CoinGecko:", err.message);
         });
     });
 }
@@ -665,7 +666,7 @@ function tryBalanceSupply() {
                 return console.error("Failed to get best currency and pool when trying to balance supply:", error);
             }
             // Loop through tokens for exchanges to best currency code
-            for (const currencyCode of Object.keys(db.currencies))
+            currency_loop: for (const currencyCode of Object.keys(db.currencies))
                 if (currencyCode !== "ETH" && currencyCode !== bestCurrencyCode) {
                     // Convert a maximum of the currency's raw total balance at a maximum marginal output according to AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING
                     var maxInputAmountBN = getRawTotalBalanceBN(currencyCode);
@@ -676,14 +677,16 @@ function tryBalanceSupply() {
                         }
                         catch (error) {
                             db.isBalancingSupply = false;
-                            return console.error("Failed to get price from 0x API when trying to balance supply:", error);
+                            console.error("Failed to get price of", currencyCode, "to", bestCurrencyCode, "from 0x API when trying to balance supply:", error);
+                            continue;
                         }
                         try {
                             var [bestPoolNameForThisCurrency, bestAprForThisCurrency] = yield getBestPoolByCurrency(currencyCode);
                         }
                         catch (error) {
                             db.isBalancingSupply = false;
-                            return console.error("Failed to get best currency and pool when trying to balance supply:", error);
+                            console.error("Failed to get best pool of", currencyCode, "when trying to balance supply:", error);
+                            continue;
                         }
                         // Get seconds since last supply balancing (if we don't know the last time, assume it's been one week)
                         // TODO: Get lastTimeBalanced from a database instead of storing in a variable
@@ -699,7 +702,8 @@ function tryBalanceSupply() {
                         }
                         catch (error) {
                             db.isBalancingSupply = false;
-                            return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+                            console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+                            continue;
                         }
                         // Withdraw estimatedInputAmountBN tokens from pools in order of lowest to highest supply rate
                         var poolNames = Object.keys(db.pools);
@@ -733,7 +737,8 @@ function tryBalanceSupply() {
                                 }
                                 catch (error) {
                                     db.isBalancingSupply = false;
-                                    return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+                                    console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+                                    continue currency_loop;
                                 }
                                 try {
                                     var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee), web3.utils.toBN(gasPrice));
@@ -743,7 +748,8 @@ function tryBalanceSupply() {
                                     // Stop trying on 3rd error
                                     if (i == 3) {
                                         db.isBalancingSupply = false;
-                                        return console.error("Failed 3 times to exchange", currencyCode, "to", bestCurrencyCode, "when balancing supply:", error);
+                                        console.error("Failed 3 times to exchange", currencyCode, "to", bestCurrencyCode, "when balancing supply:", error);
+                                        continue currency_loop;
                                     }
                                 }
                             }

@@ -18,6 +18,9 @@ export default class CompoundProtocol {
 
     comptrollerContract = "0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B";
 
+    prices = {};
+    pricesLastUpdated = 0;
+
     constructor(web3: Web3) {
         this.web3 = web3;
     }
@@ -229,11 +232,7 @@ export default class CompoundProtocol {
     
     getCurrencyUsdRates(currencyCodes) {
         return new Promise((resolve, reject) => {
-            https.get('https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=' + currencyCodes.join(','), {
-                headers: {
-                    'X-CMC_PRO_API_KEY': process.env.CMC_PRO_API_KEY
-                }
-            }, (resp) => {
+            https.get('https://api.coingecko.com/api/v3/coins/list', (resp) => {
                 let data = '';
     
                 // A chunk of data has been recieved
@@ -244,14 +243,37 @@ export default class CompoundProtocol {
                 // The whole response has been received
                 resp.on('end', () => {
                     var decoded = JSON.parse(data);
-                    if (!decoded || !decoded.data) reject("Failed to decode USD exchange rates from CoinMarketCap");
-    
-                    var prices = {};
-                    for (const key of Object.keys(decoded.data)) prices[key] = decoded.data[key].quote.USD.price;
-                    resolve(prices);
+                    if (!decoded) return reject("Failed to decode coins list from CoinGecko");
+                    var currencyCodesByCoinGeckoIds = {};
+
+                    for (const currencyCode of currencyCodes) {
+                        if (currencyCode === "COMP") currencyCodesByCoinGeckoIds["compound-governance-token"] = "COMP";
+                        else if (currencyCode === "REP") currencyCodesByCoinGeckoIds["augur"] = "REP";
+                        else currencyCodesByCoinGeckoIds[decoded.find(coin => coin.symbol.toLowerCase() === currencyCode.toLowerCase()).id] = currencyCode;
+                    }
+
+                    https.get('https://api.coingecko.com/api/v3/simple/price?vs_currencies=usd&ids=' + Object.keys(currencyCodesByCoinGeckoIds).join('%2C'), (resp) => {
+                        let data = '';
+            
+                        // A chunk of data has been recieved
+                        resp.on('data', (chunk) => {
+                            data += chunk;
+                        });
+            
+                        // The whole response has been received
+                        resp.on('end', () => {
+                            var decoded = JSON.parse(data);
+                            if (!decoded) return reject("Failed to decode USD exchange rates from CoinGecko");
+                            var prices = {};
+                            for (const key of Object.keys(decoded)) prices[currencyCodesByCoinGeckoIds[key]] = ["DAI", "USDC", "USDT", "SAI"].indexOf(currencyCodesByCoinGeckoIds[key]) >= 0 ? 1.0 : decoded[key].usd;
+                            resolve(prices);
+                        });
+                    }).on("error", (err) => {
+                        reject("Error requesting currency rates from CoinGecko: " + err.message);
+                    });
                 });
             }).on("error", (err) => {
-                reject("Error requesting currency rates from CoinMarketCap: " + err.message);
+                reject("Error requesting currency rates from CoinGecko: " + err.message);
             });
         });
     }
@@ -275,8 +297,19 @@ export default class CompoundProtocol {
 
                     // Get cToken USD prices
                     var currencyCodes = ["COMP"];
-                    for (const cToken of decoded.cToken) currencyCodes.push(cToken.underlying_symbol);
-                    var prices = await this.getCurrencyUsdRates(currencyCodes);
+                    var priceMissing = false;
+
+                    for (const cToken of decoded.cToken) {
+                        currencyCodes.push(cToken.underlying_symbol);
+                        if (!this.prices[cToken.underlying_symbol]) priceMissing = true;
+                    }
+
+                    var now = (new Date()).getTime() / 1000;
+
+                    if (now > this.pricesLastUpdated + parseFloat(process.env.UPDATE_CURRENCY_USD_RATES_INTERVAL_SECONDS) || priceMissing) {
+                        this.prices = await this.getCurrencyUsdRates(currencyCodes);
+                        this.pricesLastUpdated = now;
+                    }
                     
                     // Get currency APY and total yearly interest
                     var currencyUnderlyingSupply = 0;
@@ -285,7 +318,7 @@ export default class CompoundProtocol {
                     
                     for (const cToken of decoded.cToken) {
                         var underlyingBorrow = cToken.total_borrows.value * cToken.exchange_rate.value;
-                        var borrowUsd = underlyingBorrow * prices[cToken.underlying_symbol];
+                        var borrowUsd = underlyingBorrow * this.prices[cToken.underlying_symbol];
 
                         if (cToken.underlying_symbol === currencyCode) {
                             currencyUnderlyingSupply = cToken.total_supply.value * cToken.exchange_rate.value;
@@ -301,7 +334,7 @@ export default class CompoundProtocol {
                     var marketCompPerBlock = compPerBlock * (currencyBorrowUsd / totalBorrowUsd);
                     var marketSupplierCompPerBlock = marketCompPerBlock / 2;
                     var marketSupplierCompPerBlockPerUsd = marketSupplierCompPerBlock / currencyUnderlyingSupply; // Assumes that the value of currencyCode is $1
-                    var marketSupplierUsdFromCompPerBlockPerUsd = marketSupplierCompPerBlockPerUsd * prices["COMP"];
+                    var marketSupplierUsdFromCompPerBlockPerUsd = marketSupplierCompPerBlockPerUsd * this.prices["COMP"];
                     resolve(marketSupplierUsdFromCompPerBlockPerUsd * 1e18);
                 });
             });

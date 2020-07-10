@@ -16,7 +16,6 @@ module.exports = {
       ETHEREUM_ADMIN_PRIVATE_KEY: 'C721ABE244F3C55B3CA8F7395F3D1EFE97ED8BED200C235DC2F3FCD9873ACCE3',
       ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS: '0xa5E348898D6b55B9724Fba87eA709C7aDcF91cBc',
       WEB3_HTTP_PROVIDER_URL: "http://localhost:8546",
-      CMC_PRO_API_KEY: "553ca912-5740-4550-88f1-ad68fdbb1592",
       REBALANCER_CYCLE_DELAY_SECONDS: 60,
       AUTOMATIC_SUPPLY_BALANCING_ENABLED: 1,
       AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD: 0.001, // The minimum algorithmic net value of an automatic supply rebalancing required to actually execute it (algorithmic net value of a rebalancing = additional yearly interest in USD expected from the rebalancing (including COMP) * seconds since last rebalancing of this currency / maximum possible Ethereum gas fees in USD required for the rebalancing); in theory, set is 1 to break even (right?)
@@ -35,7 +34,6 @@ module.exports = {
       ETHEREUM_ADMIN_PRIVATE_KEY: 'C721ABE244F3C55B3CA8F7395F3D1EFE97ED8BED200C235DC2F3FCD9873ACCE3',
       ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS: '0xa5E348898D6b55B9724Fba87eA709C7aDcF91cBc',
       WEB3_HTTP_PROVIDER_URL: "https://mainnet.infura.io/v3/c52a3970da0a47978bee0fe7988b67b6",
-      CMC_PRO_API_KEY: "553ca912-5740-4550-88f1-ad68fdbb1592",
       REBALANCER_CYCLE_DELAY_SECONDS: 60,
       AUTOMATIC_SUPPLY_BALANCING_ENABLED: 1,
       AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD: 1.0, // The minimum algorithmic net value of an automatic supply rebalancing required to actually execute it (algorithmic net value of a rebalancing = additional yearly interest in USD expected from the rebalancing (including COMP) * seconds since last rebalancing of this currency / maximum possible Ethereum gas fees in USD required for the rebalancing); in theory, set is 1 to break even (right?)
