@@ -665,7 +665,7 @@ async function tryBalanceSupply() {
         }
 
         // Loop through tokens for exchanges to best currency code
-        for (const currencyCode of Object.keys(db.currencies)) if (currencyCode !== "ETH" && currencyCode !== bestCurrencyCode) {
+        currency_loop: for (const currencyCode of Object.keys(db.currencies)) if (currencyCode !== "ETH" && currencyCode !== bestCurrencyCode) {
             // Convert a maximum of the currency's raw total balance at a maximum marginal output according to AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING
             var maxInputAmountBN = getRawTotalBalanceBN(currencyCode);
 
@@ -675,14 +675,16 @@ async function tryBalanceSupply() {
                     var price = await zeroExExchange.getPrice(currencyCode, bestCurrencyCode);
                 } catch (error) {
                     db.isBalancingSupply = false;
-                    return console.error("Failed to get price from 0x API when trying to balance supply:", error);
+                    console.error("Failed to get price of", currencyCode, "to", bestCurrencyCode, "from 0x API when trying to balance supply:", error);
+                    continue;
                 }
 
                 try {
                     var [bestPoolNameForThisCurrency, bestAprForThisCurrency] = await getBestPoolByCurrency(currencyCode);
                 } catch (error) {
                     db.isBalancingSupply = false;
-                    return console.error("Failed to get best currency and pool when trying to balance supply:", error);
+                    console.error("Failed to get best pool of", currencyCode, "when trying to balance supply:", error);
+                    continue;
                 }
 
                 // Get seconds since last supply balancing (if we don't know the last time, assume it's been one week)
@@ -700,7 +702,8 @@ async function tryBalanceSupply() {
                     var [orders, estimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = await zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
                 } catch (error) {
                     db.isBalancingSupply = false;
-                    return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+                    console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+                    continue;
                 }
     
                 // Withdraw estimatedInputAmountBN tokens from pools in order of lowest to highest supply rate
@@ -735,7 +738,8 @@ async function tryBalanceSupply() {
                             var [orders, newEstimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = await zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, estimatedInputAmountBN, minMarginalOutputAmountBN);
                         } catch (error) {
                             db.isBalancingSupply = false;
-                            return console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+                            console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+                            continue currency_loop;
                         }
 
                         try {
@@ -745,7 +749,8 @@ async function tryBalanceSupply() {
                             // Stop trying on 3rd error
                             if (i == 3) {
                                 db.isBalancingSupply = false;
-                                return console.error("Failed 3 times to exchange", currencyCode, "to", bestCurrencyCode, "when balancing supply:", error);
+                                console.error("Failed 3 times to exchange", currencyCode, "to", bestCurrencyCode, "when balancing supply:", error);
+                                continue currency_loop;
                             }
                         }
                     }
