@@ -193,7 +193,7 @@ export default class CompoundProtocol {
         var comptrollerContract = new this.web3.eth.Contract(comptrollerAbi, this.comptrollerContract);
         
         // Create claimComp transaction
-        var data = comptrollerContract.methods.claimComp(process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS).encodeABI();
+        var data = comptrollerContract.methods.claimComp([process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS], Object.values(this.cErc20Contracts), false, true).encodeABI();
 
         // Build transaction
         var tx = {

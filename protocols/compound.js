@@ -210,7 +210,7 @@ class CompoundProtocol {
             // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
             var comptrollerContract = new this.web3.eth.Contract(comptrollerAbi, this.comptrollerContract);
             // Create claimComp transaction
-            var data = comptrollerContract.methods.claimComp(process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS).encodeABI();
+            var data = comptrollerContract.methods.claimComp([process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS], Object.values(this.cErc20Contracts), false, true).encodeABI();
             // Build transaction
             var tx = {
                 from: process.env.ETHEREUM_ADMIN_ACCOUNT,
