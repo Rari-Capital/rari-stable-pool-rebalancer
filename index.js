@@ -713,7 +713,7 @@ function tryBalanceSupply() {
                         }
                         catch (error) {
                             // Retry up to 2 more times
-                            for (var i = 0; i < 3; i++) {
+                            for (var i = 0; i < 2; i++) {
                                 try {
                                     var [orders, newEstimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, estimatedInputAmountBN, minMarginalOutputAmountBN);
                                 }
@@ -728,7 +728,7 @@ function tryBalanceSupply() {
                                 }
                                 catch (error) {
                                     // Stop trying on 3rd error
-                                    if (i == 3) {
+                                    if (i == 1) {
                                         db.isBalancingSupply = false;
                                         console.error("Failed 3 times to exchange", currencyCode, "to", bestCurrencyCode, "when balancing supply:", error);
                                         continue currency_loop;
