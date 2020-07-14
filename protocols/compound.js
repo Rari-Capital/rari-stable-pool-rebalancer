@@ -26,6 +26,7 @@ class CompoundProtocol {
             "USDT": "0xf650C3d88D12dB855b8bf7D11Be6C55A4e07dCC9"
         };
         this.comptrollerContract = "0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B";
+        this.compTokenContract = "0xc00e94Cb662C3520282E6f5717214004A7f26888";
         this.prices = {};
         this.pricesLastUpdated = 0;
         this.web3 = web3;
@@ -209,7 +210,7 @@ class CompoundProtocol {
             // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
             var comptrollerContract = new this.web3.eth.Contract(comptrollerAbi, this.comptrollerContract);
             // Create claimComp transaction
-            var data = comptrollerContract.methods.claimComp(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS).encodeABI();
+            var data = comptrollerContract.methods.claimComp(process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS).encodeABI();
             // Build transaction
             var tx = {
                 from: process.env.ETHEREUM_ADMIN_ACCOUNT,

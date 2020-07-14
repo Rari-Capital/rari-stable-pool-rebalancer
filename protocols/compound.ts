@@ -17,6 +17,7 @@ export default class CompoundProtocol {
     };
 
     comptrollerContract = "0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B";
+    compTokenContract = "0xc00e94Cb662C3520282E6f5717214004A7f26888";
 
     prices = {};
     pricesLastUpdated = 0;
@@ -192,7 +193,7 @@ export default class CompoundProtocol {
         var comptrollerContract = new this.web3.eth.Contract(comptrollerAbi, this.comptrollerContract);
         
         // Create claimComp transaction
-        var data = comptrollerContract.methods.claimComp(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS).encodeABI();
+        var data = comptrollerContract.methods.claimComp(process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS).encodeABI();
 
         // Build transaction
         var tx = {

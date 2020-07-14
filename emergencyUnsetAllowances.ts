@@ -4,7 +4,7 @@ const assert = require('assert');
 import DydxProtocol from './protocols/dydx';
 import CompoundProtocol from './protocols/compound';
 
-const rariFundManagerAbi = require('./abi/RariFundManager.json');
+const rariFundControllerAbi = require('./abi/RariFundController.json');
 
 // Init Web3
 var web3 = new Web3(new Web3.providers.HttpProvider(process.env.INFURA_ENDPOINT_URL));
@@ -18,8 +18,10 @@ var currencyCodesByPool = {
     "Compound": ["DAI", "USDC", "USDT"]
 };
 
+var zeroExCurrencyCodes = ["DAI", "USDC", "USDT", "COMP"];
+
 if (process.argv[2] === "0x") {
-    unsetTokenAllowanceTo0x(currencyCodesByPool[process.argv[2]][i]);
+    for (var i = 0; i < zeroExCurrencyCodes.length; i++) unsetTokenAllowanceTo0x(zeroExCurrencyCodes[i]);
 } else {
     assert(currencyCodesByPool[process.argv[2]]);
     for (var i = 0; i < currencyCodesByPool[process.argv[2]].length; i++) unsetTokenAllowanceToPool(process.argv[2], currencyCodesByPool[process.argv[2]][i]);
@@ -50,15 +52,15 @@ async function unsetTokenAllowanceTo0x(currencyCode) {
 }
 
 async function approveFundsToPool(poolName, currencyCode, amountBN) {
-    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+    var fundControllerContract = new web3.eth.Contract(rariFundControllerAbi, process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS);
 
     // Create depositToPool transaction
-    var data = fundManagerContract.methods.approveToPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
+    var data = fundControllerContract.methods.approveToPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
 
     // Build transaction
     var tx = {
         from: process.env.ETHEREUM_ADMIN_ACCOUNT,
-        to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
+        to: process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS,
         value: 0,
         data: data,
         nonce: await web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
@@ -92,15 +94,15 @@ async function approveFundsToPool(poolName, currencyCode, amountBN) {
 }
 
 async function approveFundsTo0x(currencyCode, amountBN) {
-    var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS);
+    var fundControllerContract = new web3.eth.Contract(rariFundControllerAbi, process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS);
 
     // Create depositToPool transaction
-    var data = fundManagerContract.methods.approveTo0x(currencyCode, amountBN).encodeABI();
+    var data = fundControllerContract.methods.approveTo0x(currencyCode, amountBN).encodeABI();
 
     // Build transaction
     var tx = {
         from: process.env.ETHEREUM_ADMIN_ACCOUNT,
-        to: process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS,
+        to: process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS,
         value: 0,
         data: data,
         nonce: await web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
