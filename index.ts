@@ -209,7 +209,7 @@ async function tryClaimAndExchangeComp() {
         if ((await getTokenAllowanceTo0xBN("COMP")).lt(web3.utils.toBN(2).pow(web3.utils.toBN(255)).sub(web3.utils.toBN(1))))
             await setMaxTokenAllowanceTo0x("COMP");
     } catch (error) {
-        console.error(error);
+        return console.error(error);
     }
 
     // Get estimated filled input amount from 0x swap API
@@ -752,7 +752,8 @@ async function tryBalanceSupply() {
             var idealBalances = await getIdealBalancesByCurrency(currencyCode);
         } catch (error) {
             db.isBalancingSupply = false;
-            return console.error("Failed to get ideal balances when trying to balance supply of", currencyCode, ":", error);
+            console.error("Failed to get ideal balances when trying to balance supply of", currencyCode, ":", error);
+            continue;
         }
         
         // Check for any changes in ideal balances
@@ -774,7 +775,8 @@ async function tryBalanceSupply() {
             try {
                 var maxEthereumMinerFeesBN = await getMaxEthereumMinerFeesForSupplyBalancing(currencyCode, idealBalances);
             } catch (error) {
-                return console.error("Failed to check max Ethereum miner fees before balancing supply:", error)
+                console.error("Failed to check max Ethereum miner fees before balancing supply:", error);
+                continue;
             }
         
             var maxEthereumMinerFees = parseInt(maxEthereumMinerFeesBN.toString()); // TODO: BN.prototype.toNumber replacement
@@ -788,7 +790,8 @@ async function tryBalanceSupply() {
             // Check AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD
             if (expectedAdditionalYearlyInterestUsd * (secondsSinceLastSupplyBalancing / 86400 / 365) / maxMinerFeesUsd < parseFloat(process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD)) {
                 db.isBalancingSupply = false;
-                return console.log("Not balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", (secondsSinceLastSupplyBalancing / 86400 / 365), "/", maxMinerFeesUsd, "is less than", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD);
+                console.log("Not balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", (secondsSinceLastSupplyBalancing / 86400 / 365), "/", maxMinerFeesUsd, "is less than", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD);
+                continue;
             }
     
             console.log("Balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", (secondsSinceLastSupplyBalancing / 86400 / 365), "/", maxMinerFeesUsd, "is at least", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD);
@@ -798,7 +801,8 @@ async function tryBalanceSupply() {
                 await doBalanceSupply(db, currencyCode, idealBalances, maxEthereumMinerFeesBN);
             } catch (error) {
                 db.isBalancingSupply = false;
-                return console.error("Failed to balance supply of", currencyCode, ":", error);
+                console.error("Failed to balance supply of", currencyCode, ":", error);
+                continue;
             }
 
             db.currencies[currencyCode].lastTimeBalanced = epoch;

@@ -213,7 +213,7 @@ function tryClaimAndExchangeComp() {
                 yield setMaxTokenAllowanceTo0x("COMP");
         }
         catch (error) {
-            console.error(error);
+            return console.error(error);
         }
         // Get estimated filled input amount from 0x swap API
         try {
@@ -750,7 +750,8 @@ function tryBalanceSupply() {
                 }
                 catch (error) {
                     db.isBalancingSupply = false;
-                    return console.error("Failed to get ideal balances when trying to balance supply of", currencyCode, ":", error);
+                    console.error("Failed to get ideal balances when trying to balance supply of", currencyCode, ":", error);
+                    continue;
                 }
                 // Check for any changes in ideal balances
                 var anyChanges = false;
@@ -770,7 +771,8 @@ function tryBalanceSupply() {
                         var maxEthereumMinerFeesBN = yield getMaxEthereumMinerFeesForSupplyBalancing(currencyCode, idealBalances);
                     }
                     catch (error) {
-                        return console.error("Failed to check max Ethereum miner fees before balancing supply:", error);
+                        console.error("Failed to check max Ethereum miner fees before balancing supply:", error);
+                        continue;
                     }
                     var maxEthereumMinerFees = parseInt(maxEthereumMinerFeesBN.toString()); // TODO: BN.prototype.toNumber replacement
                     var maxMinerFeesUsd = maxEthereumMinerFees / Math.pow(10, 18) * db.currencies["ETH"].usdRate;
@@ -781,7 +783,8 @@ function tryBalanceSupply() {
                     // Check AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD
                     if (expectedAdditionalYearlyInterestUsd * (secondsSinceLastSupplyBalancing / 86400 / 365) / maxMinerFeesUsd < parseFloat(process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD)) {
                         db.isBalancingSupply = false;
-                        return console.log("Not balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", (secondsSinceLastSupplyBalancing / 86400 / 365), "/", maxMinerFeesUsd, "is less than", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD);
+                        console.log("Not balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", (secondsSinceLastSupplyBalancing / 86400 / 365), "/", maxMinerFeesUsd, "is less than", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD);
+                        continue;
                     }
                     console.log("Balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", (secondsSinceLastSupplyBalancing / 86400 / 365), "/", maxMinerFeesUsd, "is at least", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD);
                     // Balance supply!
@@ -790,7 +793,8 @@ function tryBalanceSupply() {
                     }
                     catch (error) {
                         db.isBalancingSupply = false;
-                        return console.error("Failed to balance supply of", currencyCode, ":", error);
+                        console.error("Failed to balance supply of", currencyCode, ":", error);
+                        continue;
                     }
                     db.currencies[currencyCode].lastTimeBalanced = epoch;
                 }
