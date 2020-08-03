@@ -1,14 +1,19 @@
 {
   "name": "rari-fund-rebalancer",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Rebalancer script for the Rari Capital stablecoin fund.",
   "main": "index.js",
   "scripts": {
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
-  "license": "",
+  "author": {
+    "name": "David Lucid",
+    "email": "david@rari.capital",
+    "url": "https://github.com/davidlucid"
+  },
+  "license": "UNLICENSED",
+  "private": true,
   "dependencies": {
     "web3": "^1.2.6"
   },
