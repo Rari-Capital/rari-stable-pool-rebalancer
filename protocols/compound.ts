@@ -163,9 +163,9 @@ export default class CompoundProtocol {
         var cErc20Contract = new this.web3.eth.Contract(cErc20DelegatorAbi, this.cErc20Contracts[currencyCode]);
         
         try {
-            var balanceOfUnderlying = await cErc20Contract.methods.balanceOfUnderlying(process.env.ETHEREUM_FUND_MANAGER_CONTRACT_ADDRESS).call();
+            var balanceOfUnderlying = await cErc20Contract.methods.balanceOfUnderlying(process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS).call();
         } catch (error) {
-            throw "Error when checking underlying Compound balance of " + currencyCode + ":" + error;
+            throw "Error when checking underlying Compound balance of " + currencyCode + ": " + error;
         }
 
         if (process.env.NODE_ENV !== "production") console.log("CompoundProtocol.getUnderlyingBalance got", balanceOfUnderlying, currencyCode);
