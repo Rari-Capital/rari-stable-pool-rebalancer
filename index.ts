@@ -4,6 +4,7 @@ import https from 'https';
 
 import DydxProtocol from './protocols/dydx';
 import CompoundProtocol from './protocols/compound';
+import AaveProtocol from './protocols/aave';
 import ZeroExExchange from './exchanges/0x';
 
 const erc20Abi = JSON.parse(fs.readFileSync(__dirname + '/abi/ERC20.json', 'utf8'));
@@ -23,6 +24,7 @@ var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.
 // Init protocols
 var dydxProtocol = new DydxProtocol(web3);
 var compoundProtocol = new CompoundProtocol(web3);
+var aaveProtocol = new AaveProtocol(web3);
 
 // Init 0x exchange
 var zeroExExchange = new ZeroExExchange(web3);
@@ -55,6 +57,27 @@ var db = {
             tokenAddress: "0xdac17f958d2ee523a2206206994597c13d831ec7",
             usdRate: 0,
             coinGeckoId: "tether"
+        },
+        "TUSD": {
+            fundControllerContractBalanceBN: web3.utils.toBN(0),
+            decimals: 18,
+            tokenAddress: "0x4da9b813057d04baef4e5800e36083717b4a0341",
+            usdRate: 0,
+            coinGeckoId: "true-usd"
+        },
+        "BUSD": {
+            fundControllerContractBalanceBN: web3.utils.toBN(0),
+            decimals: 18,
+            tokenAddress: "0x6Ee0f7BB50a54AB5253dA0667B0Dc2ee526C30a8",
+            usdRate: 0,
+            coinGeckoId: "binance-usd"
+        },
+        "sUSD": {
+            fundControllerContractBalanceBN: web3.utils.toBN(0),
+            decimals: 18,
+            tokenAddress: "0x625ae63000f46200499120b906716420bd059240",
+            usdRate: 0,
+            coinGeckoId: "susd"
         }
     },
     pools: {
@@ -81,6 +104,34 @@ var db = {
                     supplyApr: 0
                 },
                 "USDT": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                }
+            }
+        },
+        "Aave": {
+            currencies: {
+                "DAI": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "USDC": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "USDT": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "TUSD": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "BUSD": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "sUSD": {
                     poolBalanceBN: web3.utils.toBN(0),
                     supplyApr: 0
                 }
@@ -302,6 +353,7 @@ async function getAllAprs() {
         try {
             if (key === "dYdX") var aprs = await dydxProtocol.getAprs(Object.keys(db.pools[key].currencies));
             else if (key == "Compound") var aprs = await compoundProtocol.getAprsWithComp(Object.keys(db.pools[key].currencies));
+            else if (key == "Aave") var aprs = await aaveProtocol.getAprs(Object.keys(db.pools[key].currencies));
             else return console.error("Failed to get APRs for unrecognized pool:", key);
         } catch (error) {
             console.error("Failed to get APRs for", key, "pool:", error);
@@ -340,9 +392,10 @@ async function getTokenAllowanceToPoolBN(poolName, currencyCode) {
     // TODO: Remove @ts-ignore below
     // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
     var erc20Contract = new web3.eth.Contract(erc20Abi, db.currencies[currencyCode].tokenAddress);
+    var destinationAddress = poolName == "Aave" ? aaveProtocol.lendingPoolCoreContract : (poolName == "Compound" ? compoundProtocol.cErc20Contracts[currencyCode] : dydxProtocol.soloMarginContract.options.address);
 
     try {
-        return web3.utils.toBN(await erc20Contract.methods.allowance(process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS, poolName == "Compound" ? compoundProtocol.cErc20Contracts[currencyCode] : dydxProtocol.soloMarginContract.options.address).call());
+        return web3.utils.toBN(await erc20Contract.methods.allowance(process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS, destinationAddress).call());
     } catch (error) {
         throw "Error when retreiving " + currencyCode + " allowance of FundController to " + poolName + ": " + error;
     }
@@ -414,6 +467,7 @@ async function updateCurrencyUsdRates() {
 async function predictApr(currencyCode, poolName, balanceDifferenceBN) {
     if (poolName === "dYdX") return await dydxProtocol.predictApr(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
     else if (poolName == "Compound") return await compoundProtocol.predictAprWithComp(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN, db.currencies[currencyCode].decimals);
+    else if (poolName == "Aave") return await aaveProtocol.predictApr(currencyCode, balanceDifferenceBN);
     else throw "Failed to predict APR for unrecognized pool: " + poolName;
 }
 
@@ -657,9 +711,7 @@ async function tryBalanceSupply() {
                 try {
                     var price = await zeroExExchange.getPrice(currencyCode, bestCurrencyCode);
                 } catch (error) {
-                    db.isBalancingSupply = false;
-                    console.error("Failed to get price of", currencyCode, "to", bestCurrencyCode, "from 0x API when trying to balance supply:", error);
-                    continue;
+                    var price = "1";
                 }
 
                 try {
@@ -823,12 +875,12 @@ async function getMaxEthereumMinerFeesForSupplyBalancing(currencyCode, poolBalan
 
     for (var i = 0; i < poolBalances.length; i++) {
         if (poolBalances[i].balanceDifferenceBN.gt(web3.utils.toBN(0))) {
-            if (poolBalances[i].poolName === "dYdX") gasNecessary += 300000; // TODO: Correct dYdX gas prices
-            else if (poolBalances[i].poolName === "Compound") gasNecessary += currencyCode === "DAI" ? 300000 : 150000;
+            if (poolBalances[i].poolName === "dYdX") gasNecessary += 150000;
+            else if (poolBalances[i].poolName === "Compound") gasNecessary += currencyCode === "DAI" ? 300000 : 200000;
             else gasNecessary += 300000; // TODO: Correct default gas price assumption
         } else if (poolBalances[i].balanceDifferenceBN.isNeg()) {
-            if (poolBalances[i].poolName === "dYdX") gasNecessary += 300000; // TODO: Correct dYdX gas prices
-            else if (poolBalances[i].poolName === "Compound") gasNecessary += 90000;
+            if (poolBalances[i].poolName === "dYdX") gasNecessary += poolBalances[i].balanceBN.isZero() ? 150000 : 300000;
+            else if (poolBalances[i].poolName === "Compound") gasNecessary += poolBalances[i].balanceBN.isZero() ? (currencyCode === "DAI" ? 350000 : 250000) : (currencyCode === "DAI" ? 400000 : 250000);
             else gasNecessary += 300000; // TODO: Correct default gas price assumption
         }
     }
@@ -898,7 +950,7 @@ async function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerF
 
 async function approveFundsToPool(poolName, currencyCode, amountBN) {
     // Create depositToPool transaction
-    var data = fundControllerContract.methods.approveToPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
+    var data = fundControllerContract.methods.approveToPool(["dYdX", "Compound", "Aave"].indexOf(poolName), currencyCode, amountBN).encodeABI();
 
     // Build transaction
     var tx = {
@@ -938,7 +990,7 @@ async function approveFundsToPool(poolName, currencyCode, amountBN) {
 
 async function addFunds(poolName, currencyCode, amountBN) {
     // Create depositToPool transaction
-    var data = fundControllerContract.methods.depositToPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
+    var data = fundControllerContract.methods.depositToPool(["dYdX", "Compound", "Aave"].indexOf(poolName), currencyCode, amountBN).encodeABI();
 
     // Build transaction
     var tx = {
@@ -953,7 +1005,7 @@ async function addFunds(poolName, currencyCode, amountBN) {
 
     // Estimate gas for transaction
     try {
-        tx["gas"] = await web3.eth.estimateGas(tx);
+        tx["gas"] = Math.floor((await web3.eth.estimateGas(tx)) * parseFloat(process.env.GAS_LIMIT_MULTIPLIER));
     } catch (error) {
         throw "Failed to estimate gas before signing and sending transaction for depositToPool of " + currencyCode + " to " + poolName + ": " + error;
     }
@@ -978,7 +1030,7 @@ async function addFunds(poolName, currencyCode, amountBN) {
 
 async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
     // Create withdrawFromPool transaction
-    var data = (removeAll ? fundControllerContract.methods.withdrawAllFromPool(poolName == "Compound" ? 1 : 0, currencyCode) : fundControllerContract.methods.withdrawFromPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN)).encodeABI();
+    var data = (removeAll ? fundControllerContract.methods.withdrawAllFromPool(["dYdX", "Compound", "Aave"].indexOf(poolName), currencyCode) : fundControllerContract.methods.withdrawFromPool(["dYdX", "Compound", "Aave"].indexOf(poolName), currencyCode, amountBN)).encodeABI();
 
     // Build transaction
     var tx = {
@@ -993,7 +1045,7 @@ async function removeFunds(poolName, currencyCode, amountBN, removeAll = false) 
 
     // Estimate gas for transaction
     try {
-        tx["gas"] = await web3.eth.estimateGas(tx);
+        tx["gas"] = Math.floor((await web3.eth.estimateGas(tx)) * parseFloat(process.env.GAS_LIMIT_MULTIPLIER));
     } catch (error) {
         throw "Failed to estimate gas before signing and sending transaction for " + (removeAll ? "withdrawAllFromPool" : "withdrawFromPool") + " of " + currencyCode + " from " + poolName + ": " + error;
     }
@@ -1082,7 +1134,7 @@ async function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFi
     }
     
     // Create marketSell0xOrdersFillOrKill transaction
-    var data = fundControllerContract.methods.marketSell0xOrdersFillOrKill(orders, signatures, takerAssetFillAmountBN).encodeABI();
+    var data = fundControllerContract.methods.marketSell0xOrdersFillOrKill(inputCurrencyCode, outputCurrencyCode, orders, signatures, takerAssetFillAmountBN).encodeABI();
 
     // Build transaction
     var tx = {
@@ -1098,7 +1150,7 @@ async function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFi
 
     // Estimate gas for transaction
     try {
-        tx["gas"] = await web3.eth.estimateGas(tx);
+        tx["gas"] = Math.floor((await web3.eth.estimateGas(tx)) * parseFloat(process.env.GAS_LIMIT_MULTIPLIER));
     } catch (error) {
         throw "Failed to estimate gas before signing and sending transaction for marketSell0xOrdersFillOrKill to exchange " + inputCurrencyCode + " to " + outputCurrencyCode + ": " + error;
     }
@@ -1173,6 +1225,7 @@ async function checkPoolBalances() {
                 for (const currencyCode of Object.keys(db.pools[poolName].currencies)) currencyCodesByTokenAddress[db.currencies[currencyCode].tokenAddress] = currencyCode;
                 var balances = await dydxProtocol.getUnderlyingBalances(currencyCodesByTokenAddress);
             } else if (poolName == "Compound") var balances = await compoundProtocol.getUnderlyingBalances(Object.keys(db.pools[poolName].currencies));
+            else if (poolName == "Aave") var balances = await aaveProtocol.getUnderlyingBalances(Object.keys(db.pools[poolName].currencies));
             else return console.error("Failed to get balances for unrecognized pool:", poolName);
         } catch (error) {
             console.error("Failed to get balances for", poolName, "pool:", error);
@@ -1199,6 +1252,12 @@ async function checkTokenPoolBalances(currencyCode) {
                     db.pools[poolName].currencies[currencyCode].poolBalanceBN = await compoundProtocol.getUnderlyingBalance(currencyCode);
                 } catch (error) {
                     return console.error("Failed to get", currencyCode, "balance on Compound:", error);
+                }
+            } else if (poolName == "Aave") {
+                try {
+                    db.pools[poolName].currencies[currencyCode].poolBalanceBN = await aaveProtocol.getUnderlyingBalance(currencyCode);
+                } catch (error) {
+                    return console.error("Failed to get", currencyCode, "balance on Aave:", error);
                 }
             } else return console.error("Failed to get balances for unrecognized pool:", poolName);
         } catch (error) {

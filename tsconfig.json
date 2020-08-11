@@ -11,6 +11,7 @@
         "index.ts",
         "protocols/dydx.ts",
         "protocols/compound.ts",
+        "protocols/aave.ts",
         "emergencyUnsetAllowances.ts"
     ]
 }

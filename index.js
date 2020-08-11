@@ -17,6 +17,7 @@ const web3_1 = __importDefault(require("web3"));
 const https_1 = __importDefault(require("https"));
 const dydx_1 = __importDefault(require("./protocols/dydx"));
 const compound_1 = __importDefault(require("./protocols/compound"));
+const aave_1 = __importDefault(require("./protocols/aave"));
 const _0x_1 = __importDefault(require("./exchanges/0x"));
 const erc20Abi = JSON.parse(fs_1.default.readFileSync(__dirname + '/abi/ERC20.json', 'utf8'));
 const rariFundControllerAbi = JSON.parse(fs_1.default.readFileSync(__dirname + '/abi/RariFundController.json', 'utf8'));
@@ -32,6 +33,7 @@ var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.
 // Init protocols
 var dydxProtocol = new dydx_1.default(web3);
 var compoundProtocol = new compound_1.default(web3);
+var aaveProtocol = new aave_1.default(web3);
 // Init 0x exchange
 var zeroExExchange = new _0x_1.default(web3);
 // Mock currency and pool database
@@ -62,6 +64,27 @@ var db = {
             tokenAddress: "0xdac17f958d2ee523a2206206994597c13d831ec7",
             usdRate: 0,
             coinGeckoId: "tether"
+        },
+        "TUSD": {
+            fundControllerContractBalanceBN: web3.utils.toBN(0),
+            decimals: 18,
+            tokenAddress: "0x4da9b813057d04baef4e5800e36083717b4a0341",
+            usdRate: 0,
+            coinGeckoId: "true-usd"
+        },
+        "BUSD": {
+            fundControllerContractBalanceBN: web3.utils.toBN(0),
+            decimals: 18,
+            tokenAddress: "0x6Ee0f7BB50a54AB5253dA0667B0Dc2ee526C30a8",
+            usdRate: 0,
+            coinGeckoId: "binance-usd"
+        },
+        "sUSD": {
+            fundControllerContractBalanceBN: web3.utils.toBN(0),
+            decimals: 18,
+            tokenAddress: "0x625ae63000f46200499120b906716420bd059240",
+            usdRate: 0,
+            coinGeckoId: "susd"
         }
     },
     pools: {
@@ -88,6 +111,34 @@ var db = {
                     supplyApr: 0
                 },
                 "USDT": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                }
+            }
+        },
+        "Aave": {
+            currencies: {
+                "DAI": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "USDC": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "USDT": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "TUSD": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "BUSD": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                },
+                "sUSD": {
                     poolBalanceBN: web3.utils.toBN(0),
                     supplyApr: 0
                 }
@@ -309,6 +360,8 @@ function getAllAprs() {
                     var aprs = yield dydxProtocol.getAprs(Object.keys(db.pools[key].currencies));
                 else if (key == "Compound")
                     var aprs = yield compoundProtocol.getAprsWithComp(Object.keys(db.pools[key].currencies));
+                else if (key == "Aave")
+                    var aprs = yield aaveProtocol.getAprs(Object.keys(db.pools[key].currencies));
                 else
                     return console.error("Failed to get APRs for unrecognized pool:", key);
             }
@@ -352,8 +405,9 @@ function getTokenAllowanceToPoolBN(poolName, currencyCode) {
         // TODO: Remove @ts-ignore below
         // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
         var erc20Contract = new web3.eth.Contract(erc20Abi, db.currencies[currencyCode].tokenAddress);
+        var destinationAddress = poolName == "Aave" ? aaveProtocol.lendingPoolCoreContract : (poolName == "Compound" ? compoundProtocol.cErc20Contracts[currencyCode] : dydxProtocol.soloMarginContract.options.address);
         try {
-            return web3.utils.toBN(yield erc20Contract.methods.allowance(process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS, poolName == "Compound" ? compoundProtocol.cErc20Contracts[currencyCode] : dydxProtocol.soloMarginContract.options.address).call());
+            return web3.utils.toBN(yield erc20Contract.methods.allowance(process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS, destinationAddress).call());
         }
         catch (error) {
             throw "Error when retreiving " + currencyCode + " allowance of FundController to " + poolName + ": " + error;
@@ -429,6 +483,8 @@ function predictApr(currencyCode, poolName, balanceDifferenceBN) {
             return yield dydxProtocol.predictApr(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN);
         else if (poolName == "Compound")
             return yield compoundProtocol.predictAprWithComp(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN, db.currencies[currencyCode].decimals);
+        else if (poolName == "Aave")
+            return yield aaveProtocol.predictApr(currencyCode, balanceDifferenceBN);
         else
             throw "Failed to predict APR for unrecognized pool: " + poolName;
     });
@@ -658,9 +714,7 @@ function tryBalanceSupply() {
                             var price = yield zeroExExchange.getPrice(currencyCode, bestCurrencyCode);
                         }
                         catch (error) {
-                            db.isBalancingSupply = false;
-                            console.error("Failed to get price of", currencyCode, "to", bestCurrencyCode, "from 0x API when trying to balance supply:", error);
-                            continue;
+                            var price = "1";
                         }
                         try {
                             var [bestPoolNameForThisCurrency, bestAprForThisCurrency] = yield getBestPoolByCurrency(currencyCode);
@@ -816,17 +870,17 @@ function getMaxEthereumMinerFeesForSupplyBalancing(currencyCode, poolBalances) {
         for (var i = 0; i < poolBalances.length; i++) {
             if (poolBalances[i].balanceDifferenceBN.gt(web3.utils.toBN(0))) {
                 if (poolBalances[i].poolName === "dYdX")
-                    gasNecessary += 300000; // TODO: Correct dYdX gas prices
+                    gasNecessary += 150000;
                 else if (poolBalances[i].poolName === "Compound")
-                    gasNecessary += currencyCode === "DAI" ? 300000 : 150000;
+                    gasNecessary += currencyCode === "DAI" ? 300000 : 200000;
                 else
                     gasNecessary += 300000; // TODO: Correct default gas price assumption
             }
             else if (poolBalances[i].balanceDifferenceBN.isNeg()) {
                 if (poolBalances[i].poolName === "dYdX")
-                    gasNecessary += 300000; // TODO: Correct dYdX gas prices
+                    gasNecessary += poolBalances[i].balanceBN.isZero() ? 150000 : 300000;
                 else if (poolBalances[i].poolName === "Compound")
-                    gasNecessary += 90000;
+                    gasNecessary += poolBalances[i].balanceBN.isZero() ? (currencyCode === "DAI" ? 350000 : 250000) : (currencyCode === "DAI" ? 400000 : 250000);
                 else
                     gasNecessary += 300000; // TODO: Correct default gas price assumption
             }
@@ -894,7 +948,7 @@ function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerFeesBN 
 function approveFundsToPool(poolName, currencyCode, amountBN) {
     return __awaiter(this, void 0, void 0, function* () {
         // Create depositToPool transaction
-        var data = fundControllerContract.methods.approveToPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
+        var data = fundControllerContract.methods.approveToPool(["dYdX", "Compound", "Aave"].indexOf(poolName), currencyCode, amountBN).encodeABI();
         // Build transaction
         var tx = {
             from: process.env.ETHEREUM_ADMIN_ACCOUNT,
@@ -933,7 +987,7 @@ function approveFundsToPool(poolName, currencyCode, amountBN) {
 function addFunds(poolName, currencyCode, amountBN) {
     return __awaiter(this, void 0, void 0, function* () {
         // Create depositToPool transaction
-        var data = fundControllerContract.methods.depositToPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN).encodeABI();
+        var data = fundControllerContract.methods.depositToPool(["dYdX", "Compound", "Aave"].indexOf(poolName), currencyCode, amountBN).encodeABI();
         // Build transaction
         var tx = {
             from: process.env.ETHEREUM_ADMIN_ACCOUNT,
@@ -946,7 +1000,7 @@ function addFunds(poolName, currencyCode, amountBN) {
             console.log("Adding", amountBN.toString(), currencyCode, "funds to", poolName, ":", tx);
         // Estimate gas for transaction
         try {
-            tx["gas"] = yield web3.eth.estimateGas(tx);
+            tx["gas"] = Math.floor((yield web3.eth.estimateGas(tx)) * parseFloat(process.env.GAS_LIMIT_MULTIPLIER));
         }
         catch (error) {
             throw "Failed to estimate gas before signing and sending transaction for depositToPool of " + currencyCode + " to " + poolName + ": " + error;
@@ -972,7 +1026,7 @@ function addFunds(poolName, currencyCode, amountBN) {
 function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
     return __awaiter(this, void 0, void 0, function* () {
         // Create withdrawFromPool transaction
-        var data = (removeAll ? fundControllerContract.methods.withdrawAllFromPool(poolName == "Compound" ? 1 : 0, currencyCode) : fundControllerContract.methods.withdrawFromPool(poolName == "Compound" ? 1 : 0, currencyCode, amountBN)).encodeABI();
+        var data = (removeAll ? fundControllerContract.methods.withdrawAllFromPool(["dYdX", "Compound", "Aave"].indexOf(poolName), currencyCode) : fundControllerContract.methods.withdrawFromPool(["dYdX", "Compound", "Aave"].indexOf(poolName), currencyCode, amountBN)).encodeABI();
         // Build transaction
         var tx = {
             from: process.env.ETHEREUM_ADMIN_ACCOUNT,
@@ -985,7 +1039,7 @@ function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
             console.log("Removing", removeAll ? "all of" : amountBN.toString(), currencyCode, "from", poolName, ":", tx);
         // Estimate gas for transaction
         try {
-            tx["gas"] = yield web3.eth.estimateGas(tx);
+            tx["gas"] = Math.floor((yield web3.eth.estimateGas(tx)) * parseFloat(process.env.GAS_LIMIT_MULTIPLIER));
         }
         catch (error) {
             throw "Failed to estimate gas before signing and sending transaction for " + (removeAll ? "withdrawAllFromPool" : "withdrawFromPool") + " of " + currencyCode + " from " + poolName + ": " + error;
@@ -1071,7 +1125,7 @@ function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFillAmou
             };
         }
         // Create marketSell0xOrdersFillOrKill transaction
-        var data = fundControllerContract.methods.marketSell0xOrdersFillOrKill(orders, signatures, takerAssetFillAmountBN).encodeABI();
+        var data = fundControllerContract.methods.marketSell0xOrdersFillOrKill(inputCurrencyCode, outputCurrencyCode, orders, signatures, takerAssetFillAmountBN).encodeABI();
         // Build transaction
         var tx = {
             from: process.env.ETHEREUM_ADMIN_ACCOUNT,
@@ -1085,7 +1139,7 @@ function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFillAmou
             console.log("Exchanging up to", takerAssetFillAmountBN.toString(), inputCurrencyCode, "to", outputCurrencyCode, ":", tx);
         // Estimate gas for transaction
         try {
-            tx["gas"] = yield web3.eth.estimateGas(tx);
+            tx["gas"] = Math.floor((yield web3.eth.estimateGas(tx)) * parseFloat(process.env.GAS_LIMIT_MULTIPLIER));
         }
         catch (error) {
             throw "Failed to estimate gas before signing and sending transaction for marketSell0xOrdersFillOrKill to exchange " + inputCurrencyCode + " to " + outputCurrencyCode + ": " + error;
@@ -1168,6 +1222,8 @@ function checkPoolBalances() {
                 }
                 else if (poolName == "Compound")
                     var balances = yield compoundProtocol.getUnderlyingBalances(Object.keys(db.pools[poolName].currencies));
+                else if (poolName == "Aave")
+                    var balances = yield aaveProtocol.getUnderlyingBalances(Object.keys(db.pools[poolName].currencies));
                 else
                     return console.error("Failed to get balances for unrecognized pool:", poolName);
             }
@@ -1201,6 +1257,14 @@ function checkTokenPoolBalances(currencyCode) {
                     }
                     catch (error) {
                         return console.error("Failed to get", currencyCode, "balance on Compound:", error);
+                    }
+                }
+                else if (poolName == "Aave") {
+                    try {
+                        db.pools[poolName].currencies[currencyCode].poolBalanceBN = yield aaveProtocol.getUnderlyingBalance(currencyCode);
+                    }
+                    catch (error) {
+                        return console.error("Failed to get", currencyCode, "balance on Aave:", error);
                     }
                 }
                 else

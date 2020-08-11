@@ -20,9 +20,9 @@ class ZeroExExchange {
                 resp.on('end', () => {
                     var decoded = JSON.parse(data);
                     if (!decoded)
-                        reject("Failed to decode prices from 0x swap API");
+                        return reject("Failed to decode prices from 0x swap API");
                     if (!decoded.records)
-                        reject("No prices found on 0x swap API");
+                        return reject("No prices found on 0x swap API");
                     for (var i = 0; i < decoded.records.length; i++)
                         if (decoded.records[i].symbol === outputTokenSymbol)
                             resolve(decoded.records[i].price);
@@ -45,9 +45,9 @@ class ZeroExExchange {
                 resp.on('end', () => {
                     var decoded = JSON.parse(data);
                     if (!decoded)
-                        reject("Failed to decode quote from 0x swap API");
+                        return reject("Failed to decode quote from 0x swap API");
                     if (!decoded.orders)
-                        reject("No orders found on 0x swap API");
+                        return reject("No orders found on 0x swap API");
                     decoded.orders.sort((a, b) => (a.makerAssetAmount / (a.takerAssetAmount + a.takerFee) < b.makerAssetAmount / (b.takerAssetAmount + b.takerFee)) ? 1 : -1);
                     var orders = [];
                     var inputFilledAmountBN = this.web3.utils.toBN(0);
@@ -80,7 +80,7 @@ class ZeroExExchange {
                             break;
                     }
                     if (takerAssetFilledAmountBN.isZero())
-                        reject("No orders satisfying minMarginalOutputAmountBN found on 0x swap API");
+                        return reject("No orders satisfying minMarginalOutputAmountBN found on 0x swap API");
                     resolve([orders, inputFilledAmountBN, decoded.protocolFee, takerAssetFilledAmountBN, decoded.gasPrice]);
                 });
             }).on("error", (err) => {
