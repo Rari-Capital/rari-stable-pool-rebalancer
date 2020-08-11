@@ -145,7 +145,7 @@ var db = {
 async function doCycle() {
     await checkAllTokenBalances();
     await getAllAprs();
-    await setAcceptedCurrencies();
+    await configureAcceptedCurrencies();
     if (parseInt(process.env.AUTOMATIC_SUPPLY_BALANCING_ENABLED)) await tryBalanceSupply();
     setTimeout(doCycle, (process.env.REBALANCER_CYCLE_DELAY_SECONDS ? parseFloat(process.env.REBALANCER_CYCLE_DELAY_SECONDS) : 60) * 1000);
 }
@@ -280,34 +280,44 @@ async function tryClaimAndExchangeComp() {
 
 /* SETTING ACCEPTED CURRENCIES */
 
-async function setAcceptedCurrencies() {
-    // Get best currencies and pools for potential currency exchange
+async function configureAcceptedCurrencies() {
+    // Get best currencies and pools
     try {
         var pools = await getBestCurrenciesAndPools();
     } catch (error) {
         return console.error("Failed to get best currencies and pools when trying to set accepted currencies:", error);
     }
 
+    // Get currently accepted currencies
+    var acceptedCurrencies = await fundManagerContract.methods.getAcceptedCurrencies().call();
+
+    // Get currencies to be accepted
     var currenciesChecked = [];
     
     for (var i = 0; i < pools.length; i++) {
         if (currenciesChecked.indexOf(pools[i].currencyCode) >= 0) continue;
         currenciesChecked.push(pools[i].currencyCode);
-        var accepted = await fundManagerContract.methods.isCurrencyAccepted(pools[i].currencyCode).call();
+        var accepted = acceptedCurrencies.indexOf(pools[i].currencyCode) >= 0;
         var shouldBeAccepted = i == 0 || pools[i].supplyApr >= pools[0].supplyApr * 0.9;
+        if (!accepted && shouldBeAccepted) { paramCurrencyCodes.push(pools[i].currencyCode); paramAccepted.push(true); }
+        else if (accepted && !shouldBeAccepted) { paramCurrencyCodes.push(pools[i].currencyCode); paramAccepted.push(false); }
 
-        try {
-            if (!accepted && shouldBeAccepted) await setAcceptedCurrency(pools[i].currencyCode, true);
-            else if (accepted && !shouldBeAccepted) await setAcceptedCurrency(pools[i].currencyCode, false);
-        } catch (error) {
-            return console.error(error);
-        }
+    }
+
+    // Set accepted currencies
+    var paramCurrencyCodes = [];
+    var paramAccepted = [];
+
+    try {
+        await setAcceptedCurrencies(paramCurrencyCodes, paramAccepted);
+    } catch (error) {
+        return console.error(error);
     }
 }
 
-async function setAcceptedCurrency(currencyCode, accepted) {
+async function setAcceptedCurrencies(currencyCodes, accepted) {
     // Create processPendingWithdrawals transaction
-    var data = fundManagerContract.methods.setAcceptedCurrency(currencyCode, accepted).encodeABI();
+    var data = fundManagerContract.methods.setAcceptedCurrencies(currencyCodes, accepted).encodeABI();
 
     // Build transaction
     var tx = {
@@ -318,30 +328,30 @@ async function setAcceptedCurrency(currencyCode, accepted) {
         nonce: await web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
     };
 
-    if (process.env.NODE_ENV !== "production") console.log("Setting", currencyCode, "as", accepted ? "accepted" : "not accepted", ":", tx);
+    if (process.env.NODE_ENV !== "production") console.log("Setting accepted currencies with parameters", currencyCodes, "and", accepted, ":", tx);
 
     // Estimate gas for transaction
     try {
         tx["gas"] = await web3.eth.estimateGas(tx);
     } catch (error) {
-        throw "Failed to estimate gas before signing and sending transaction for setAcceptedCurrency: " + error;
+        throw "Failed to estimate gas before signing and sending transaction for setAcceptedCurrencies: " + error;
     }
     
     // Sign transaction
     try {
         var signedTx = await web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
     } catch (error) {
-        throw "Error signing transaction for setAcceptedCurrency: " + error;
+        throw "Error signing transaction for setAcceptedCurrencies: " + error;
     }
 
     // Send transaction
     try {
         var sentTx = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
     } catch (error) {
-        throw "Error sending transaction for setAcceptedCurrency: " + error;
+        throw "Error sending transaction for setAcceptedCurrencies: " + error;
     }
     
-    console.log("Successfully set", currencyCode, "as", accepted ? "accepted" : "not accepted", ":", sentTx);
+    console.log("Successfully accepted currencies with parameters", currencyCodes, "and", accepted, ":", sentTx);
     return sentTx;
 }
 

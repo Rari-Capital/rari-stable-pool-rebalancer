@@ -152,7 +152,7 @@ function doCycle() {
     return __awaiter(this, void 0, void 0, function* () {
         yield checkAllTokenBalances();
         yield getAllAprs();
-        yield setAcceptedCurrencies();
+        yield configureAcceptedCurrencies();
         if (parseInt(process.env.AUTOMATIC_SUPPLY_BALANCING_ENABLED))
             yield tryBalanceSupply();
         setTimeout(doCycle, (process.env.REBALANCER_CYCLE_DELAY_SECONDS ? parseFloat(process.env.REBALANCER_CYCLE_DELAY_SECONDS) : 60) * 1000);
@@ -283,38 +283,49 @@ function tryClaimAndExchangeComp() {
     });
 }
 /* SETTING ACCEPTED CURRENCIES */
-function setAcceptedCurrencies() {
+function configureAcceptedCurrencies() {
     return __awaiter(this, void 0, void 0, function* () {
-        // Get best currencies and pools for potential currency exchange
+        // Get best currencies and pools
         try {
             var pools = yield getBestCurrenciesAndPools();
         }
         catch (error) {
             return console.error("Failed to get best currencies and pools when trying to set accepted currencies:", error);
         }
+        // Get currently accepted currencies
+        var acceptedCurrencies = yield fundManagerContract.methods.getAcceptedCurrencies().call();
+        // Get currencies to be accepted
         var currenciesChecked = [];
         for (var i = 0; i < pools.length; i++) {
             if (currenciesChecked.indexOf(pools[i].currencyCode) >= 0)
                 continue;
             currenciesChecked.push(pools[i].currencyCode);
-            var accepted = yield fundManagerContract.methods.isCurrencyAccepted(pools[i].currencyCode).call();
+            var accepted = acceptedCurrencies.indexOf(pools[i].currencyCode) >= 0;
             var shouldBeAccepted = i == 0 || pools[i].supplyApr >= pools[0].supplyApr * 0.9;
-            try {
-                if (!accepted && shouldBeAccepted)
-                    yield setAcceptedCurrency(pools[i].currencyCode, true);
-                else if (accepted && !shouldBeAccepted)
-                    yield setAcceptedCurrency(pools[i].currencyCode, false);
+            if (!accepted && shouldBeAccepted) {
+                paramCurrencyCodes.push(pools[i].currencyCode);
+                paramAccepted.push(true);
             }
-            catch (error) {
-                return console.error(error);
+            else if (accepted && !shouldBeAccepted) {
+                paramCurrencyCodes.push(pools[i].currencyCode);
+                paramAccepted.push(false);
             }
+        }
+        // Set accepted currencies
+        var paramCurrencyCodes = [];
+        var paramAccepted = [];
+        try {
+            yield setAcceptedCurrencies(paramCurrencyCodes, paramAccepted);
+        }
+        catch (error) {
+            return console.error(error);
         }
     });
 }
-function setAcceptedCurrency(currencyCode, accepted) {
+function setAcceptedCurrencies(currencyCodes, accepted) {
     return __awaiter(this, void 0, void 0, function* () {
         // Create processPendingWithdrawals transaction
-        var data = fundManagerContract.methods.setAcceptedCurrency(currencyCode, accepted).encodeABI();
+        var data = fundManagerContract.methods.setAcceptedCurrencies(currencyCodes, accepted).encodeABI();
         // Build transaction
         var tx = {
             from: process.env.ETHEREUM_ADMIN_ACCOUNT,
@@ -324,29 +335,29 @@ function setAcceptedCurrency(currencyCode, accepted) {
             nonce: yield web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
         };
         if (process.env.NODE_ENV !== "production")
-            console.log("Setting", currencyCode, "as", accepted ? "accepted" : "not accepted", ":", tx);
+            console.log("Setting accepted currencies with parameters", currencyCodes, "and", accepted, ":", tx);
         // Estimate gas for transaction
         try {
             tx["gas"] = yield web3.eth.estimateGas(tx);
         }
         catch (error) {
-            throw "Failed to estimate gas before signing and sending transaction for setAcceptedCurrency: " + error;
+            throw "Failed to estimate gas before signing and sending transaction for setAcceptedCurrencies: " + error;
         }
         // Sign transaction
         try {
             var signedTx = yield web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
         }
         catch (error) {
-            throw "Error signing transaction for setAcceptedCurrency: " + error;
+            throw "Error signing transaction for setAcceptedCurrencies: " + error;
         }
         // Send transaction
         try {
             var sentTx = yield web3.eth.sendSignedTransaction(signedTx.rawTransaction);
         }
         catch (error) {
-            throw "Error sending transaction for setAcceptedCurrency: " + error;
+            throw "Error sending transaction for setAcceptedCurrencies: " + error;
         }
-        console.log("Successfully set", currencyCode, "as", accepted ? "accepted" : "not accepted", ":", sentTx);
+        console.log("Successfully accepted currencies with parameters", currencyCodes, "and", accepted, ":", sentTx);
         return sentTx;
     });
 }
