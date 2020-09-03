@@ -61,23 +61,23 @@ var db = {
         "TUSD": {
             fundControllerContractBalanceBN: web3.utils.toBN(0),
             decimals: 18,
-            tokenAddress: "0x4da9b813057d04baef4e5800e36083717b4a0341",
+            tokenAddress: "0x0000000000085d4780B73119b644AE5ecd22b376",
             usdRate: 0,
             coinGeckoId: "true-usd"
         },
         "BUSD": {
             fundControllerContractBalanceBN: web3.utils.toBN(0),
             decimals: 18,
-            tokenAddress: "0x6Ee0f7BB50a54AB5253dA0667B0Dc2ee526C30a8",
+            tokenAddress: "0x4Fabb145d64652a948d72533023f6E7A623C7C53",
             usdRate: 0,
             coinGeckoId: "binance-usd"
         },
         "sUSD": {
             fundControllerContractBalanceBN: web3.utils.toBN(0),
             decimals: 18,
-            tokenAddress: "0x625ae63000f46200499120b906716420bd059240",
+            tokenAddress: "0x57ab1ec28d129707052df4df418d58a2d46d5f51",
             usdRate: 0,
-            coinGeckoId: "susd"
+            coinGeckoId: "nusd"
         }
     },
     pools: {
@@ -727,7 +727,6 @@ async function tryBalanceSupply() {
                 try {
                     var [bestPoolNameForThisCurrency, bestAprForThisCurrency] = await getBestPoolByCurrency(currencyCode);
                 } catch (error) {
-                    db.isBalancingSupply = false;
                     console.error("Failed to get best pool of", currencyCode, "when trying to balance supply:", error);
                     continue;
                 }
@@ -746,14 +745,14 @@ async function tryBalanceSupply() {
                 try {
                     var [orders, estimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = await zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
                 } catch (error) {
-                    db.isBalancingSupply = false;
                     console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
                     continue;
                 }
     
                 // Withdraw estimatedInputAmountBN tokens from pools in order of lowest to highest supply rate
-                var poolNames = Object.keys(db.pools);
-                poolNames.sort((a, b) => (db.pools[a].supplyApr > db.pools[b].supplyApr) ? 1 : -1);
+                var poolNames = [];
+                for (const poolName of Object.keys(db.pools)) if (db.pools[poolName].currencies[currencyCode] && db.pools[poolName].currencies[currencyCode].poolBalanceBN.gt(Web3.utils.toBN(0))) poolNames.push(poolName);
+                poolNames.sort((a, b) => (db.pools[a].currencies[currencyCode].supplyApr > db.pools[b].currencies[currencyCode].supplyApr) ? 1 : -1);
 
                 for (const poolName of poolNames) {
                     if (db.currencies[currencyCode].fundControllerContractBalanceBN.gte(estimatedInputAmountBN)) break;
@@ -782,7 +781,6 @@ async function tryBalanceSupply() {
                         try {
                             var [orders, newEstimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = await zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, estimatedInputAmountBN, minMarginalOutputAmountBN);
                         } catch (error) {
-                            db.isBalancingSupply = false;
                             console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
                             continue currency_loop;
                         }
@@ -793,7 +791,6 @@ async function tryBalanceSupply() {
                         } catch (error) {
                             // Stop trying on 3rd error
                             if (i == 1) {
-                                db.isBalancingSupply = false;
                                 console.error("Failed 3 times to exchange", currencyCode, "to", bestCurrencyCode, "when balancing supply:", error);
                                 continue currency_loop;
                             }
@@ -813,7 +810,6 @@ async function tryBalanceSupply() {
         try {
             var idealBalances = await getIdealBalancesByCurrency(currencyCode);
         } catch (error) {
-            db.isBalancingSupply = false;
             console.error("Failed to get ideal balances when trying to balance supply of", currencyCode, ":", error);
             continue;
         }
@@ -851,7 +847,6 @@ async function tryBalanceSupply() {
         
             // Check AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD
             if (expectedAdditionalYearlyInterestUsd * (secondsSinceLastSupplyBalancing / 86400 / 365) / maxMinerFeesUsd < parseFloat(process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD)) {
-                db.isBalancingSupply = false;
                 console.log("Not balancing supply of", currencyCode, "because", expectedAdditionalYearlyInterestUsd, "*", (secondsSinceLastSupplyBalancing / 86400 / 365), "/", maxMinerFeesUsd, "is less than", process.env.AUTOMATIC_SUPPLY_BALANCING_MIN_ADDITIONAL_YEARLY_INTEREST_USD_TIMES_YEARS_SINCE_LAST_REBALANCING_PER_GAS_USD);
                 continue;
             }
@@ -862,7 +857,6 @@ async function tryBalanceSupply() {
             try {
                 await doBalanceSupply(db, currencyCode, idealBalances, maxEthereumMinerFeesBN);
             } catch (error) {
-                db.isBalancingSupply = false;
                 console.error("Failed to balance supply of", currencyCode, ":", error);
                 continue;
             }
@@ -955,7 +949,7 @@ async function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerF
     }
 
     // Update wallet balance in mock database
-    db.currencies[currencyCode].fundControllerContractBalanceBN = db.currencies[currencyCode].fundControllerContractBalanceBN.sub(totalBalanceDifferenceBN);
+    db.currencies[currencyCode].fundControllerContractBalanceBN.isub(totalBalanceDifferenceBN);
 }
 
 async function approveFundsToPool(poolName, currencyCode, amountBN) {
