@@ -18,6 +18,7 @@ const https_1 = __importDefault(require("https"));
 const dydx_1 = __importDefault(require("./protocols/dydx"));
 const compound_1 = __importDefault(require("./protocols/compound"));
 const aave_1 = __importDefault(require("./protocols/aave"));
+const mstable_1 = __importDefault(require("./protocols/mstable"));
 const _0x_1 = __importDefault(require("./exchanges/0x"));
 const erc20Abi = JSON.parse(fs_1.default.readFileSync(__dirname + '/abi/ERC20.json', 'utf8'));
 const rariFundControllerAbi = JSON.parse(fs_1.default.readFileSync(__dirname + '/abi/RariFundController.json', 'utf8'));
@@ -34,6 +35,7 @@ var fundManagerContract = new web3.eth.Contract(rariFundManagerAbi, process.env.
 var dydxProtocol = new dydx_1.default(web3);
 var compoundProtocol = new compound_1.default(web3);
 var aaveProtocol = new aave_1.default(web3);
+var mStableProtocol = new mstable_1.default(web3);
 // Init 0x exchange
 var zeroExExchange = new _0x_1.default(web3);
 // Mock currency and pool database
@@ -85,6 +87,13 @@ var db = {
             tokenAddress: "0x57ab1ec28d129707052df4df418d58a2d46d5f51",
             usdRate: 0,
             coinGeckoId: "nusd"
+        },
+        "mUSD": {
+            fundControllerContractBalanceBN: web3.utils.toBN(0),
+            decimals: 18,
+            tokenAddress: "0xe2f2a5c287993345a840db3b0845fbc70f5935a5",
+            usdRate: 0,
+            coinGeckoId: "musd"
         }
     },
     pools: {
@@ -139,6 +148,14 @@ var db = {
                     supplyApr: 0
                 },
                 "sUSD": {
+                    poolBalanceBN: web3.utils.toBN(0),
+                    supplyApr: 0
+                }
+            }
+        },
+        "mStable": {
+            currencies: {
+                "mUSD": {
                     poolBalanceBN: web3.utils.toBN(0),
                     supplyApr: 0
                 }
@@ -260,7 +277,7 @@ function tryClaimAndExchangeComp() {
         }
         // Approve COMP to 0x if not already
         try {
-            if ((yield getTokenAllowanceTo0xBN("COMP")).lt(web3.utils.toBN(2).pow(web3.utils.toBN(255)).sub(web3.utils.toBN(1))))
+            if ((yield getTokenAllowanceTo0xBN("COMP")).lt(web3.utils.toBN(2).pow(web3.utils.toBN(95)).sub(web3.utils.toBN(1)))) // COMP uses uint96 instead of uint256 for allowances
                 yield setMaxTokenAllowanceTo0x("COMP");
         }
         catch (error) {
@@ -285,6 +302,9 @@ function tryClaimAndExchangeComp() {
 /* SETTING ACCEPTED CURRENCIES */
 function configureAcceptedCurrencies() {
     return __awaiter(this, void 0, void 0, function* () {
+        // Get always accepted and never accepted currencies
+        var alwaysAccepted = process.env.ALWAYS_ACCEPTED_CURRENCIES.split(',');
+        var neverAccepted = process.env.NEVER_ACCEPTED_CURRENCIES.split(',');
         // Get best currencies and pools
         try {
             var pools = yield getBestCurrenciesAndPools();
@@ -296,12 +316,14 @@ function configureAcceptedCurrencies() {
         var acceptedCurrencies = yield fundManagerContract.methods.getAcceptedCurrencies().call();
         // Get currencies to be accepted
         var currenciesChecked = [];
+        var paramCurrencyCodes = [];
+        var paramAccepted = [];
         for (var i = 0; i < pools.length; i++) {
             if (currenciesChecked.indexOf(pools[i].currencyCode) >= 0)
                 continue;
             currenciesChecked.push(pools[i].currencyCode);
             var accepted = acceptedCurrencies.indexOf(pools[i].currencyCode) >= 0;
-            var shouldBeAccepted = i == 0 || pools[i].supplyApr >= pools[0].supplyApr * 0.9;
+            var shouldBeAccepted = (i == 0 || pools[i].supplyApr >= pools[0].supplyApr * 0.9 || alwaysAccepted.indexOf(pools[i].currencyCode) >= 0) && neverAccepted.indexOf(pools[i].currencyCode) < 0;
             if (!accepted && shouldBeAccepted) {
                 paramCurrencyCodes.push(pools[i].currencyCode);
                 paramAccepted.push(true);
@@ -311,9 +333,9 @@ function configureAcceptedCurrencies() {
                 paramAccepted.push(false);
             }
         }
+        if (!paramCurrencyCodes.length)
+            return;
         // Set accepted currencies
-        var paramCurrencyCodes = [];
-        var paramAccepted = [];
         try {
             yield setAcceptedCurrencies(paramCurrencyCodes, paramAccepted);
         }
@@ -367,12 +389,15 @@ function getAllAprs() {
         // Get APRs for all pools
         for (const key of Object.keys(db.pools)) {
             try {
+                var aprs;
                 if (key === "dYdX")
-                    var aprs = yield dydxProtocol.getAprs(Object.keys(db.pools[key].currencies));
+                    aprs = yield dydxProtocol.getAprs(Object.keys(db.pools[key].currencies));
                 else if (key == "Compound")
-                    var aprs = yield compoundProtocol.getAprsWithComp(Object.keys(db.pools[key].currencies));
+                    aprs = yield compoundProtocol.getAprsWithComp(Object.keys(db.pools[key].currencies));
                 else if (key == "Aave")
-                    var aprs = yield aaveProtocol.getAprs(Object.keys(db.pools[key].currencies));
+                    aprs = yield aaveProtocol.getAprs(Object.keys(db.pools[key].currencies));
+                else if (key == "mStable")
+                    aprs = { "mUSD": yield mStableProtocol.getApr() };
                 else
                     return console.error("Failed to get APRs for unrecognized pool:", key);
             }
@@ -383,6 +408,8 @@ function getAllAprs() {
             for (const key2 of Object.keys(aprs)) {
                 db.pools[key].currencies[key2].supplyApr = aprs[key2];
             }
+            if (process.env.NODE_ENV !== "production")
+                console.log("Supplier APRs updated for", key, ":", aprs);
         }
     });
 }
@@ -409,6 +436,15 @@ function setMaxTokenAllowances() {
                     console.error(error);
                 }
             }
+        for (const currencyCode of ["DAI", "USDC", "USDT", "TUSD"]) {
+            try {
+                if ((yield getTokenAllowanceToMUsdBN(currencyCode)).lt(web3.utils.toBN(2).pow(web3.utils.toBN(255)).sub(web3.utils.toBN(1))))
+                    yield setMaxTokenAllowanceToMUsd(currencyCode);
+            }
+            catch (error) {
+                console.error(error);
+            }
+        }
     });
 }
 function getTokenAllowanceToPoolBN(poolName, currencyCode) {
@@ -416,7 +452,7 @@ function getTokenAllowanceToPoolBN(poolName, currencyCode) {
         // TODO: Remove @ts-ignore below
         // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
         var erc20Contract = new web3.eth.Contract(erc20Abi, db.currencies[currencyCode].tokenAddress);
-        var destinationAddress = poolName == "Aave" ? aaveProtocol.lendingPoolCoreContract : (poolName == "Compound" ? compoundProtocol.cErc20Contracts[currencyCode] : dydxProtocol.soloMarginContract.options.address);
+        var destinationAddress = poolName == "mStable" ? mStableProtocol.savingsContract : (poolName == "Aave" ? aaveProtocol.lendingPoolCoreContract : (poolName == "Compound" ? compoundProtocol.cErc20Contracts[currencyCode] : dydxProtocol.soloMarginContract.options.address));
         try {
             return web3.utils.toBN(yield erc20Contract.methods.allowance(process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS, destinationAddress).call());
         }
@@ -462,6 +498,31 @@ function setMaxTokenAllowanceTo0x(currencyCode, unset = false) {
         console.log((unset ? "Zero" : "Max") + " token allowance set successfully for", currencyCode, "on 0x:", txid);
     });
 }
+function getTokenAllowanceToMUsdBN(currencyCode) {
+    return __awaiter(this, void 0, void 0, function* () {
+        // TODO: Remove @ts-ignore below
+        // @ts-ignore: Argument of type [...] is not assignable to parameter of type 'AbiItem | AbiItem[]'.
+        var erc20Contract = new web3.eth.Contract(erc20Abi, db.currencies[currencyCode].tokenAddress);
+        try {
+            return web3.utils.toBN(yield erc20Contract.methods.allowance(process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS, mStableProtocol.mUsdTokenContract).call());
+        }
+        catch (error) {
+            throw "Error when retreiving " + currencyCode + " allowance of FundController to mUSD: " + error;
+        }
+    });
+}
+function setMaxTokenAllowanceToMUsd(currencyCode, unset = false) {
+    return __awaiter(this, void 0, void 0, function* () {
+        console.log("Setting " + (unset ? "zero" : "max") + " token allowance for", currencyCode, "on mUSD");
+        try {
+            var txid = yield approveFundsToMUsd(currencyCode, unset ? web3.utils.toBN(0) : web3.utils.toBN(2).pow(web3.utils.toBN(256)).sub(web3.utils.toBN(1)));
+        }
+        catch (error) {
+            throw "Failed to set " + (unset ? "zero" : "max") + " token allowance for " + currencyCode + " on mUSD: " + error;
+        }
+        console.log((unset ? "Zero" : "Max") + " token allowance set successfully for", currencyCode, "on mUSD:", txid);
+    });
+}
 /* CURRENCY USD RATE UPDATING */
 function updateCurrencyUsdRates() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -496,6 +557,8 @@ function predictApr(currencyCode, poolName, balanceDifferenceBN) {
             return yield compoundProtocol.predictAprWithComp(currencyCode, db.currencies[currencyCode].tokenAddress, balanceDifferenceBN, db.currencies[currencyCode].decimals);
         else if (poolName == "Aave")
             return yield aaveProtocol.predictApr(currencyCode, balanceDifferenceBN);
+        else if (poolName == "mStable")
+            return yield mStableProtocol.getApr();
         else
             throw "Failed to predict APR for unrecognized pool: " + poolName;
     });
@@ -714,19 +777,15 @@ function tryBalanceSupply() {
                 db.isBalancingSupply = false;
                 return console.error("Failed to get best currency and pool when trying to balance supply:", error);
             }
+            // Cache mStable swap fee and vault balances
+            var mStableSwapFeeBN = null;
             // Loop through tokens for exchanges to best currency code
             currency_loop: for (const currencyCode of Object.keys(db.currencies))
                 if (currencyCode !== "ETH" && currencyCode !== bestCurrencyCode) {
                     // Convert a maximum of the currency's raw total balance at a maximum marginal output according to AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_REBALANCING
                     var maxInputAmountBN = getRawTotalBalanceBN(currencyCode);
                     if (maxInputAmountBN.gt(web3.utils.toBN(0))) {
-                        // Calculate min marginal output amount to exchange funds
-                        try {
-                            var price = yield zeroExExchange.getPrice(currencyCode, bestCurrencyCode);
-                        }
-                        catch (error) {
-                            var price = "1";
-                        }
+                        // Get best APY of this potential input currency to compare to best output currency
                         try {
                             var [bestPoolNameForThisCurrency, bestAprForThisCurrency] = yield getBestPoolByCurrency(currencyCode);
                         }
@@ -738,64 +797,159 @@ function tryBalanceSupply() {
                         // TODO: Get lastTimeBalanced from a database instead of storing in a variable
                         var epoch = (new Date()).getTime() / 1000;
                         var secondsSinceLastExchange = db.lastTimeExchanged > 0 ? epoch - db.lastTimeExchanged : 86400 * 7;
-                        // TODO: Include miner fee and 0x protocol fee in calculation of min marginal output amount
-                        // TODO: Are we sure we want to use stablecoin trade prices and not $1 flat for slippage calculations? Same question goes for the web client (which currently uses $1 flat and not stablecoin trade prices since RariFundManager assumes all tokens are worth $1)
-                        var maxMarginalOutputAmount = 1 / parseFloat(price);
-                        var minMarginalOutputAmountBN = web3.utils.toBN(Math.trunc(maxMarginalOutputAmount * (1 - (parseFloat(process.env.AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_EXCHANGE) * (bestApr - bestAprForThisCurrency) * (secondsSinceLastExchange / 86400 / 365))) * (Math.pow(10, db.currencies[bestCurrencyCode].decimals))));
-                        // Get estimated filled input amount from 0x swap API
-                        try {
-                            var [orders, estimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
+                        // Check mStable max swap if input and output currencies are supported
+                        var useMStable = false;
+                        var mStableOutputAmountAfterFeeBN = null;
+                        if (["DAI", "USDC", "USDT", "TUSD", "mUSD"].indexOf(currencyCode) >= 0 && ["DAI", "USDC", "USDT", "TUSD", "mUSD"].indexOf(bestCurrencyCode) >= 0) {
+                            if (currencyCode === "mUSD") {
+                                try {
+                                    var redeemValidity = yield mStableProtocol.getRedeemValidity(maxInputAmountBN, db.currencies[bestCurrencyCode].tokenAddress);
+                                }
+                                catch (error) {
+                                    console.error("Failed to check mUSD redeem validity:", error);
+                                    continue;
+                                }
+                                if (redeemValidity && redeemValidity["0"]) {
+                                    useMStable = true;
+                                    mStableOutputAmountAfterFeeBN = web3_1.default.utils.toBN(redeemValidity["2"]);
+                                }
+                            }
+                            else {
+                                try {
+                                    var maxSwap = yield mStableProtocol.getMaxSwap(db.currencies[currencyCode].tokenAddress, db.currencies[bestCurrencyCode].tokenAddress);
+                                }
+                                catch (error) {
+                                    console.error("Failed to check mUSD max swap:", error);
+                                    continue;
+                                }
+                                if (maxSwap && maxSwap["0"] && maxInputAmountBN.lte(web3.utils.toBN(maxSwap["2"]))) {
+                                    useMStable = true;
+                                    var outputAmountBeforeFeesBN = maxInputAmountBN.mul(web3_1.default.utils.toBN(Math.pow(10, db.currencies[bestCurrencyCode].decimals))).div(web3_1.default.utils.toBN(Math.pow(10, db.currencies[currencyCode].decimals)));
+                                    if (bestCurrencyCode === "mUSD")
+                                        mStableOutputAmountAfterFeeBN = outputAmountBeforeFeesBN;
+                                    else {
+                                        try {
+                                            var swapFeeBN = mStableProtocol.getSwapFee();
+                                        }
+                                        catch (err) {
+                                            console.error("Failed to check mUSD swap fee:", err);
+                                            continue;
+                                        }
+                                        mStableOutputAmountAfterFeeBN = outputAmountBeforeFeesBN.sub(outputAmountBeforeFeesBN.mul(swapFeeBN).div(web3_1.default.utils.toBN(1e18)));
+                                    }
+                                }
+                            }
                         }
-                        catch (error) {
-                            console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
-                            continue;
-                        }
-                        // Withdraw estimatedInputAmountBN tokens from pools in order of lowest to highest supply rate
-                        var poolNames = [];
-                        for (const poolName of Object.keys(db.pools))
-                            if (db.pools[poolName].currencies[currencyCode] && db.pools[poolName].currencies[currencyCode].poolBalanceBN.gt(web3_1.default.utils.toBN(0)))
-                                poolNames.push(poolName);
-                        poolNames.sort((a, b) => (db.pools[a].currencies[currencyCode].supplyApr > db.pools[b].currencies[currencyCode].supplyApr) ? 1 : -1);
-                        for (const poolName of poolNames) {
-                            if (db.currencies[currencyCode].fundControllerContractBalanceBN.gte(estimatedInputAmountBN))
-                                break;
-                            var leftBN = estimatedInputAmountBN.sub(db.currencies[currencyCode].fundControllerContractBalanceBN);
-                            var withdrawalAmountBN = leftBN.lte(db.pools[poolName].currencies[currencyCode].poolBalanceBN) ? leftBN : db.pools[poolName].currencies[currencyCode].poolBalanceBN;
-                            // TODO: Don't execute a supply removal if not above a threshold
+                        if (useMStable) {
+                            // Compare estimated slippage (swap fee + miner fee) to max slippage
+                            var maxSlippage = parseFloat(process.env.AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_EXCHANGE) * (bestApr - bestAprForThisCurrency) * (secondsSinceLastExchange / 86400 / 365);
+                            var inputAmountUsd = maxInputAmountBN.toString() / Math.pow(10, db.currencies[currencyCode].decimals) * db.currencies[currencyCode].usdRate;
+                            var outputAmountUsd = mStableOutputAmountAfterFeeBN.toString() / Math.pow(10, db.currencies[bestCurrencyCode].decimals) * db.currencies[bestCurrencyCode].usdRate;
                             try {
-                                var txid = yield removeFunds(poolName, currencyCode, withdrawalAmountBN, withdrawalAmountBN.eq(db.pools[poolName].currencies[currencyCode].poolBalanceBN));
+                                var gasPrice = yield web3.eth.getGasPrice();
                             }
                             catch (error) {
-                                console.error("Failed to remove funds from pool " + poolName + " when balancing supply of " + currencyCode + " before token exchange: " + error);
+                                console.error("Failed to check ETH gas price to calculate max Ethereum miner fees before calling mUSD mint:", error);
                                 continue;
                             }
-                            // Update balances
-                            db.pools[poolName].currencies[currencyCode].poolBalanceBN.isub(withdrawalAmountBN);
-                            db.currencies[currencyCode].fundControllerContractBalanceBN.iadd(withdrawalAmountBN);
-                        }
-                        // Exchange tokens!
-                        try {
-                            var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee), web3.utils.toBN(gasPrice));
-                        }
-                        catch (error) {
-                            // Retry up to 2 more times
-                            for (var i = 0; i < 2; i++) {
-                                try {
-                                    var [orders, newEstimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, estimatedInputAmountBN, minMarginalOutputAmountBN);
-                                }
-                                catch (error) {
-                                    console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
-                                    continue currency_loop;
-                                }
-                                try {
-                                    var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee), web3.utils.toBN(gasPrice));
+                            var estimatedGas = currencyCode == "mUSD" || bestCurrencyCode == "mUSD" ? 5e5 : 1e6;
+                            var minerFeeUsd = estimatedGas * parseFloat(gasPrice) / 1e18 * db.currencies["ETH"].usdRate;
+                            var estimatedSlippage = 1 - ((outputAmountUsd - minerFeeUsd) / inputAmountUsd);
+                            if (estimatedSlippage > maxSlippage) {
+                                console.log("Not minting mUSD because estimated slippage of", estimatedSlippage, "exceeds max slippage of", maxSlippage, "%");
+                                continue;
+                            }
+                            // Withdraw maxInputAmountBN tokens from pools in order of lowest to highest supply rate
+                            var poolNames = [];
+                            for (const poolName of Object.keys(db.pools))
+                                if (db.pools[poolName].currencies[currencyCode] && db.pools[poolName].currencies[currencyCode].poolBalanceBN.gt(web3_1.default.utils.toBN(0)))
+                                    poolNames.push(poolName);
+                            poolNames.sort((a, b) => (db.pools[a].currencies[currencyCode].supplyApr > db.pools[b].currencies[currencyCode].supplyApr) ? 1 : -1);
+                            for (const poolName of poolNames) {
+                                if (db.currencies[currencyCode].fundControllerContractBalanceBN.gte(maxInputAmountBN))
                                     break;
+                                var leftBN = maxInputAmountBN.sub(db.currencies[currencyCode].fundControllerContractBalanceBN);
+                                var withdrawalAmountBN = leftBN.lte(db.pools[poolName].currencies[currencyCode].poolBalanceBN) ? leftBN : db.pools[poolName].currencies[currencyCode].poolBalanceBN;
+                                // TODO: Don't execute a supply removal if not above a threshold
+                                try {
+                                    var txid = yield removeFunds(poolName, currencyCode, withdrawalAmountBN, withdrawalAmountBN.eq(db.pools[poolName].currencies[currencyCode].poolBalanceBN));
                                 }
                                 catch (error) {
-                                    // Stop trying on 3rd error
-                                    if (i == 1) {
-                                        console.error("Failed 3 times to exchange", currencyCode, "to", bestCurrencyCode, "when balancing supply:", error);
+                                    console.error("Failed to remove funds from pool " + poolName + " when balancing supply of " + currencyCode + " before token exchange: " + error);
+                                    continue;
+                                }
+                                // Update balances
+                                db.pools[poolName].currencies[currencyCode].poolBalanceBN.isub(withdrawalAmountBN);
+                                db.currencies[currencyCode].fundControllerContractBalanceBN.iadd(withdrawalAmountBN);
+                            }
+                            // Mint/redeem/swap via mStable
+                            try {
+                                var txid = yield swapMStable(currencyCode, bestCurrencyCode, maxInputAmountBN);
+                            }
+                            catch (error) {
+                                console.error("Failed to call swap via mUSD when trying to balance supply:", error);
+                            }
+                        }
+                        else {
+                            // TODO: Include miner fee and 0x protocol fee in calculation of min marginal output amount
+                            // TODO: Are we sure we want to use stablecoin trade prices and not $1 flat for slippage calculations? Same question goes for the web client (which currently uses $1 flat and not stablecoin trade prices since RariFundManager assumes all tokens are worth $1)
+                            var maxMarginalOutputAmount = db.currencies[currencyCode].usdRate / db.currencies[bestCurrencyCode].usdRate;
+                            var minMarginalOutputAmountBN = web3.utils.toBN((maxMarginalOutputAmount * (1 - (parseFloat(process.env.AUTOMATIC_TOKEN_EXCHANGE_MAX_SLIPPAGE_PER_APR_INCREASE_PER_YEAR_SINCE_LAST_EXCHANGE) * (bestApr - bestAprForThisCurrency) * (secondsSinceLastExchange / 86400 / 365))) * (Math.pow(10, db.currencies[bestCurrencyCode].decimals))).toFixed(0));
+                            // Get estimated filled input amount from 0x swap API
+                            try {
+                                var [orders, estimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, maxInputAmountBN, minMarginalOutputAmountBN);
+                            }
+                            catch (error) {
+                                console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
+                                continue;
+                            }
+                            // Withdraw estimatedInputAmountBN tokens from pools in order of lowest to highest supply rate
+                            var poolNames = [];
+                            for (const poolName of Object.keys(db.pools))
+                                if (db.pools[poolName].currencies[currencyCode] && db.pools[poolName].currencies[currencyCode].poolBalanceBN.gt(web3_1.default.utils.toBN(0)))
+                                    poolNames.push(poolName);
+                            poolNames.sort((a, b) => (db.pools[a].currencies[currencyCode].supplyApr > db.pools[b].currencies[currencyCode].supplyApr) ? 1 : -1);
+                            for (const poolName of poolNames) {
+                                if (db.currencies[currencyCode].fundControllerContractBalanceBN.gte(estimatedInputAmountBN))
+                                    break;
+                                var leftBN = estimatedInputAmountBN.sub(db.currencies[currencyCode].fundControllerContractBalanceBN);
+                                var withdrawalAmountBN = leftBN.lte(db.pools[poolName].currencies[currencyCode].poolBalanceBN) ? leftBN : db.pools[poolName].currencies[currencyCode].poolBalanceBN;
+                                // TODO: Don't execute a supply removal if not above a threshold
+                                try {
+                                    var txid = yield removeFunds(poolName, currencyCode, withdrawalAmountBN, withdrawalAmountBN.eq(db.pools[poolName].currencies[currencyCode].poolBalanceBN));
+                                }
+                                catch (error) {
+                                    console.error("Failed to remove funds from pool " + poolName + " when balancing supply of " + currencyCode + " before token exchange: " + error);
+                                    continue;
+                                }
+                                // Update balances
+                                db.pools[poolName].currencies[currencyCode].poolBalanceBN.isub(withdrawalAmountBN);
+                                db.currencies[currencyCode].fundControllerContractBalanceBN.iadd(withdrawalAmountBN);
+                            }
+                            // Exchange tokens!
+                            try {
+                                var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee), web3.utils.toBN(gasPrice));
+                            }
+                            catch (error) {
+                                // Retry up to 2 more times
+                                for (var i = 0; i < 2; i++) {
+                                    try {
+                                        var [orders, newEstimatedInputAmountBN, protocolFee, takerAssetFilledAmountBN, gasPrice] = yield zeroExExchange.getSwapOrders(db.currencies[currencyCode].tokenAddress, db.currencies[currencyCode].decimals, db.currencies[bestCurrencyCode].tokenAddress, estimatedInputAmountBN, minMarginalOutputAmountBN);
+                                    }
+                                    catch (error) {
+                                        console.error("Failed to get swap orders from 0x API when trying to balance supply:", error);
                                         continue currency_loop;
+                                    }
+                                    try {
+                                        var txid = yield exchangeFunds(currencyCode, bestCurrencyCode, takerAssetFilledAmountBN, orders, web3.utils.toBN(protocolFee), web3.utils.toBN(gasPrice));
+                                        break;
+                                    }
+                                    catch (error) {
+                                        // Stop trying on 3rd error
+                                        if (i == 1) {
+                                            console.error("Failed 3 times to exchange", currencyCode, "to", bestCurrencyCode, "when balancing supply:", error);
+                                            continue currency_loop;
+                                        }
                                     }
                                 }
                             }
@@ -955,7 +1109,7 @@ function doBalanceSupply(db, currencyCode, poolBalances, maxEthereumMinerFeesBN 
 function approveFundsToPool(poolName, currencyCode, amountBN) {
     return __awaiter(this, void 0, void 0, function* () {
         // Create depositToPool transaction
-        var data = fundControllerContract.methods.approveToPool(["dYdX", "Compound", "Aave"].indexOf(poolName), currencyCode, amountBN).encodeABI();
+        var data = fundControllerContract.methods.approveToPool(["dYdX", "Compound", "Aave", "mStable"].indexOf(poolName), currencyCode, amountBN).encodeABI();
         // Build transaction
         var tx = {
             from: process.env.ETHEREUM_ADMIN_ACCOUNT,
@@ -994,7 +1148,7 @@ function approveFundsToPool(poolName, currencyCode, amountBN) {
 function addFunds(poolName, currencyCode, amountBN) {
     return __awaiter(this, void 0, void 0, function* () {
         // Create depositToPool transaction
-        var data = fundControllerContract.methods.depositToPool(["dYdX", "Compound", "Aave"].indexOf(poolName), currencyCode, amountBN).encodeABI();
+        var data = fundControllerContract.methods.depositToPool(["dYdX", "Compound", "Aave", "mStable"].indexOf(poolName), currencyCode, amountBN).encodeABI();
         // Build transaction
         var tx = {
             from: process.env.ETHEREUM_ADMIN_ACCOUNT,
@@ -1033,7 +1187,7 @@ function addFunds(poolName, currencyCode, amountBN) {
 function removeFunds(poolName, currencyCode, amountBN, removeAll = false) {
     return __awaiter(this, void 0, void 0, function* () {
         // Create withdrawFromPool transaction
-        var data = (removeAll ? fundControllerContract.methods.withdrawAllFromPool(["dYdX", "Compound", "Aave"].indexOf(poolName), currencyCode) : fundControllerContract.methods.withdrawFromPool(["dYdX", "Compound", "Aave"].indexOf(poolName), currencyCode, amountBN)).encodeABI();
+        var data = (removeAll ? fundControllerContract.methods.withdrawAllFromPool(["dYdX", "Compound", "Aave", "mStable"].indexOf(poolName), currencyCode) : fundControllerContract.methods.withdrawFromPool(["dYdX", "Compound", "Aave", "mStable"].indexOf(poolName), currencyCode, amountBN)).encodeABI();
         // Build transaction
         var tx = {
             from: process.env.ETHEREUM_ADMIN_ACCOUNT,
@@ -1108,6 +1262,45 @@ function approveFundsTo0x(currencyCode, amountBN) {
         return sentTx;
     });
 }
+function approveFundsToMUsd(currencyCode, amountBN) {
+    return __awaiter(this, void 0, void 0, function* () {
+        // Create depositToPool transaction
+        var data = fundControllerContract.methods.approveToMUsd(currencyCode, amountBN).encodeABI();
+        // Build transaction
+        var tx = {
+            from: process.env.ETHEREUM_ADMIN_ACCOUNT,
+            to: process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS,
+            value: 0,
+            data: data,
+            nonce: yield web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
+        };
+        if (process.env.NODE_ENV !== "production")
+            console.log("Approving", amountBN.toString(), currencyCode, "funds to mUSD:", tx);
+        // Estimate gas for transaction
+        try {
+            tx["gas"] = yield web3.eth.estimateGas(tx);
+        }
+        catch (error) {
+            throw "Failed to estimate gas before signing and sending transaction for approveToMUsd of " + currencyCode + ": " + error;
+        }
+        // Sign transaction
+        try {
+            var signedTx = yield web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
+        }
+        catch (error) {
+            throw "Error signing transaction for approveToMUsd of " + currencyCode + ": " + error;
+        }
+        // Send transaction
+        try {
+            var sentTx = yield web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+        }
+        catch (error) {
+            throw "Error sending transaction for approveToMUsd of " + currencyCode + ": " + error;
+        }
+        console.log("Successfully approved", currencyCode, "funds to mUSD:", sentTx);
+        return sentTx;
+    });
+}
 function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFillAmountBN, orders, protocolFeeBN, gasPriceBN) {
     return __awaiter(this, void 0, void 0, function* () {
         // Build array of orders and signatures
@@ -1169,6 +1362,45 @@ function exchangeFunds(inputCurrencyCode, outputCurrencyCode, takerAssetFillAmou
         return sentTx;
     });
 }
+function swapMStable(inputCurrencyCode, outputCurrencyCode, inputAmountBN) {
+    return __awaiter(this, void 0, void 0, function* () {
+        // Create swapMStable transaction
+        var data = fundControllerContract.methods.swapMStable(inputCurrencyCode, outputCurrencyCode, inputAmountBN).encodeABI();
+        // Build transaction
+        var tx = {
+            from: process.env.ETHEREUM_ADMIN_ACCOUNT,
+            to: process.env.ETHEREUM_FUND_CONTROLLER_CONTRACT_ADDRESS,
+            value: 0,
+            data: data,
+            nonce: yield web3.eth.getTransactionCount(process.env.ETHEREUM_ADMIN_ACCOUNT)
+        };
+        if (process.env.NODE_ENV !== "production")
+            console.log("Swapping", inputAmountBN.toString(), inputCurrencyCode, "for", outputCurrencyCode, "via mStable:", tx);
+        // Estimate gas for transaction
+        try {
+            tx["gas"] = Math.floor((yield web3.eth.estimateGas(tx)) * parseFloat(process.env.GAS_LIMIT_MULTIPLIER));
+        }
+        catch (error) {
+            throw "Failed to estimate gas before signing and sending transaction for swapMStable: " + error;
+        }
+        // Sign transaction
+        try {
+            var signedTx = yield web3.eth.accounts.signTransaction(tx, process.env.ETHEREUM_ADMIN_PRIVATE_KEY);
+        }
+        catch (error) {
+            throw "Error signing transaction for swapMStable: " + error;
+        }
+        // Send transaction
+        try {
+            var sentTx = yield web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+        }
+        catch (error) {
+            throw "Error sending transaction for swapMStable: " + error;
+        }
+        console.log("Successfully swapped", inputAmountBN.toString(), inputCurrencyCode, "for", outputCurrencyCode, "via mStable:", sentTx);
+        return sentTx;
+    });
+}
 /* WALLET BALANCE CHECKING */
 function checkAllTokenBalances() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -1221,16 +1453,19 @@ function checkPoolBalances() {
         // Get balances for all pools
         for (const poolName of Object.keys(db.pools)) {
             try {
+                var balances;
                 if (poolName === "dYdX") {
                     var currencyCodesByTokenAddress = {};
                     for (const currencyCode of Object.keys(db.pools[poolName].currencies))
                         currencyCodesByTokenAddress[db.currencies[currencyCode].tokenAddress] = currencyCode;
-                    var balances = yield dydxProtocol.getUnderlyingBalances(currencyCodesByTokenAddress);
+                    balances = yield dydxProtocol.getUnderlyingBalances(currencyCodesByTokenAddress);
                 }
                 else if (poolName == "Compound")
-                    var balances = yield compoundProtocol.getUnderlyingBalances(Object.keys(db.pools[poolName].currencies));
+                    balances = yield compoundProtocol.getUnderlyingBalances(Object.keys(db.pools[poolName].currencies));
                 else if (poolName == "Aave")
-                    var balances = yield aaveProtocol.getUnderlyingBalances(Object.keys(db.pools[poolName].currencies));
+                    balances = yield aaveProtocol.getUnderlyingBalances(Object.keys(db.pools[poolName].currencies));
+                else if (poolName == "mStable")
+                    balances = { "mUSD": yield mStableProtocol.getMUsdSavingsBalance() };
                 else
                     return console.error("Failed to get balances for unrecognized pool:", poolName);
             }
@@ -1247,6 +1482,8 @@ function checkTokenPoolBalances(currencyCode) {
     return __awaiter(this, void 0, void 0, function* () {
         // Get balances for all pools
         for (const poolName of Object.keys(db.pools)) {
+            if (!db.pools[poolName].currencies[currencyCode])
+                continue;
             try {
                 if (poolName === "dYdX") {
                     // Might as well get all dYdX balances since it doesn't cost us anything
@@ -1272,6 +1509,16 @@ function checkTokenPoolBalances(currencyCode) {
                     }
                     catch (error) {
                         return console.error("Failed to get", currencyCode, "balance on Aave:", error);
+                    }
+                }
+                else if (poolName == "mStable") {
+                    try {
+                        if (currencyCode !== "mUSD")
+                            throw "Currency code not equal to mUSD";
+                        db.pools[poolName].currencies[currencyCode].poolBalanceBN = yield mStableProtocol.getMUsdSavingsBalance();
+                    }
+                    catch (error) {
+                        return console.error("Failed to get", currencyCode, "balance on mStable:", error);
                     }
                 }
                 else

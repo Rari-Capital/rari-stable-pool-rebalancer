@@ -4,7 +4,7 @@ Welcome to `rari-fund-rebalancer`, the central repository for the JavaScript sou
 
 ## Installation
 
-You'll want to run the script on the latest Node.js LTS (tested with v12.18.1) with the latest version of NPM.
+You'll want to run the script on the latest Node.js LTS (tested with v12.18.2) with the latest version of NPM.
 
 Install PM2 (process manager) globally: `npm i -g pm2`
 
