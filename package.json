@@ -1,11 +1,15 @@
 {
   "name": "rari-fund-rebalancer",
   "version": "2.0.0",
-  "description": "Rebalancer script for the Rari Capital stablecoin fund.",
+  "description": "Rebalancer script for the Rari Stable Pool.",
   "main": "index.js",
   "scripts": {
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Rari-Capital/rari-fund-rebalancer.git"
   },
   "author": {
     "name": "David Lucid",
