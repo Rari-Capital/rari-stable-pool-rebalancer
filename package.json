@@ -1,5 +1,5 @@
 {
-  "name": "rari-fund-rebalancer",
+  "name": "rari-stable-pool-rebalancer",
   "version": "2.0.0",
   "description": "Rebalancer script for the Rari Stable Pool.",
   "main": "index.js",
@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Rari-Capital/rari-fund-rebalancer.git"
+    "url": "https://github.com/Rari-Capital/rari-stable-pool-rebalancer.git"
   },
   "author": {
     "name": "David Lucid",

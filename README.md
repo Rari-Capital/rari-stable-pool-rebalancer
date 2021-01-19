@@ -1,6 +1,6 @@
 # Rari Stable Pool: Rebalancer
 
-Welcome to `rari-fund-rebalancer`, our repository for the JavaScript source code behind the centralized rebalancer powering the Rari Stable Pool smart contracts and dApp in our `rari-contracts` repo.
+Welcome to `rari-stable-pool-rebalancer`, our repository for the JavaScript source code behind the centralized rebalancer powering the Rari Stable Pool smart contracts and dApp in our `rari-contracts` repo.
 
 ## Installation
 
